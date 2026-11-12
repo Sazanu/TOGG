@@ -1,0 +1,165 @@
+rules_version = '2';
+
+// TOGG — Throne of God's Grace
+// Role model (keep in sync with src/lib/roles.ts):
+//   head_pastor, associate_pastor ......... every branch, everything
+//   branch_pastor ......................... own branch: members, attendance, giving, sign-ups
+//   secretary ............................. own branch: members, attendance, sign-ups
+//   finance ............................... own branch: giving (+ read members)
+//   usher ................................. own branch: attendance (+ read members, add first-time visitors)
+//   dept_leader ........................... own branch: read members
+//   pending ............................... nothing until approved
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    function me() { return get(userPath(request.auth.uid)).data; }
+    function activeUser() {
+      return signedIn() && exists(userPath(request.auth.uid))
+        && me().active == true && me().role != 'pending';
+    }
+    function isGlobal() { return activeUser() && me().role in ['head_pastor', 'associate_pastor']; }
+    function isHead() { return activeUser() && me().role == 'head_pastor'; }
+    function hasRole(branchId, roles) {
+      return activeUser() && (isGlobal() || (me().branchId == branchId && me().role in roles));
+    }
+
+    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader']); }
+    function canWriteMembers(b) { return hasRole(b, ['branch_pastor', 'secretary']); }
+    function canAttendance(b)   { return hasRole(b, ['branch_pastor', 'secretary', 'usher']); }
+    function canGiving(b)       { return hasRole(b, ['branch_pastor', 'finance']); }
+    function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']); }
+
+    function validRole(r) {
+      return r in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'pending'];
+    }
+
+    // ---------- first-run bootstrap ----------
+    match /meta/setup {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.by == request.auth.uid
+        && getAfter(userPath(request.auth.uid)).data.role == 'head_pastor';
+      allow update, delete: if false;
+    }
+
+    // ---------- users & roles ----------
+    match /users/{uid} {
+      allow read: if (signedIn() && request.auth.uid == uid) || isGlobal();
+
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'phone', 'role', 'branchId', 'departmentIds', 'active', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.branchId == null
+        && request.resource.data.departmentIds == []
+        && (
+          (request.resource.data.role == 'pending' && request.resource.data.active == false)
+          || (request.resource.data.role == 'head_pastor' && request.resource.data.active == true
+              && !exists(/databases/$(database)/documents/meta/setup)
+              && existsAfter(/databases/$(database)/documents/meta/setup))
+        );
+
+      // Anyone may edit their own name / phone.
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'phone']);
+
+      // Head / associate pastor manage everyone else.
+      // The associate pastor cannot touch or create head/associate pastors.
+      allow update: if isGlobal() && request.auth.uid != uid
+        && validRole(request.resource.data.role)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'active'])
+        && (request.resource.data.role in ['head_pastor', 'associate_pastor', 'pending'] || request.resource.data.branchId is string)
+        && (isHead() || !(resource.data.role in ['head_pastor', 'associate_pastor'] || request.resource.data.role in ['head_pastor', 'associate_pastor']));
+
+      allow delete: if isHead() && request.auth.uid != uid;
+    }
+
+    // ---------- church structure ----------
+    match /branches/{id} {
+      allow read: if true; // names/locations are shown on the public sign-up forms
+      allow write: if isGlobal();
+    }
+
+    match /departments/{id} {
+      allow read: if activeUser();
+      allow write: if isGlobal();
+    }
+
+    // ---------- members ----------
+    function validMember(d) {
+      return d.firstName is string && d.firstName.size() > 0 && d.firstName.size() <= 80
+        && d.branchId is string
+        && d.category in ['adult', 'teen', 'child']
+        && d.status in ['active', 'inactive', 'visitor']
+        && d.departmentIds is list;
+    }
+
+    match /members/{id} {
+      allow read: if canReadMembers(resource.data.branchId);
+      allow create: if validMember(request.resource.data) && (
+        canWriteMembers(request.resource.data.branchId)
+        || (canAttendance(request.resource.data.branchId) && request.resource.data.status == 'visitor')
+      );
+      allow update: if validMember(request.resource.data)
+        && canWriteMembers(resource.data.branchId)
+        && canWriteMembers(request.resource.data.branchId);
+      allow delete: if canWriteMembers(resource.data.branchId);
+    }
+
+    // ---------- attendance ----------
+    match /services/{sid} {
+      allow read: if canAttendance(resource.data.branchId);
+      allow create: if canAttendance(request.resource.data.branchId)
+        && request.resource.data.count == 0 && request.resource.data.visitors == 0
+        && request.resource.data.date is string;
+      allow update: if canAttendance(resource.data.branchId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count', 'visitors', 'title', 'type', 'date'])
+        && request.resource.data.visitors >= 0;
+      allow delete: if canWriteMembers(resource.data.branchId);
+
+      match /checkins/{mid} {
+        function svcBranch() { return get(/databases/$(database)/documents/services/$(sid)).data.branchId; }
+        allow read: if canAttendance(svcBranch());
+        allow create: if canAttendance(svcBranch()) && request.resource.data.memberId == mid;
+        allow delete: if canAttendance(svcBranch());
+        allow update: if false;
+      }
+    }
+
+    // ---------- giving ----------
+    match /giving/{id} {
+      allow read: if canGiving(resource.data.branchId);
+      allow create, update: if canGiving(request.resource.data.branchId)
+        && (request.method == 'create' || canGiving(resource.data.branchId))
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.date is string
+        && request.resource.data.type is string;
+      allow delete: if canGiving(resource.data.branchId);
+    }
+
+    // ---------- public sign-up forms ----------
+    match /registrations/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['kind', 'firstName', 'lastName', 'phone', 'email', 'gender', 'category', 'branchId', 'invitedBy', 'prayerRequest', 'status', 'createdAt'])
+        && request.resource.data.kind in ['member', 'visitor']
+        && request.resource.data.status == 'new'
+        && request.resource.data.firstName is string && request.resource.data.firstName.size() > 0 && request.resource.data.firstName.size() <= 60
+        && request.resource.data.lastName is string && request.resource.data.lastName.size() <= 60
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30
+        && request.resource.data.email is string && request.resource.data.email.size() <= 120
+        && request.resource.data.invitedBy is string && request.resource.data.invitedBy.size() <= 120
+        && request.resource.data.prayerRequest is string && request.resource.data.prayerRequest.size() <= 2000
+        && request.resource.data.category in ['adult', 'teen', 'child']
+        && request.resource.data.branchId is string
+        && exists(/databases/$(database)/documents/branches/$(request.resource.data.branchId))
+        && request.resource.data.createdAt == request.time;
+      allow read, delete: if canSignups(resource.data.branchId);
+      allow update: if canSignups(resource.data.branchId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'processedAt']);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
