@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Building2, CalendarCheck, HandCoins, Inbox, LayoutDashboard, LogOut, Menu, Network, ShieldCheck, Users, X,
+  Building2, CalendarCheck, ClipboardList, Database, HandCoins, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
@@ -9,17 +9,22 @@ import { ROLE_LABELS, can, type Capability } from '../lib/roles';
 import { Logo } from './Logo';
 import { Avatar, cx } from './ui';
 
-interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability }
+interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability; section: string }
 
 const NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-  { to: '/members', label: 'Members', icon: <Users className="h-5 w-5" />, cap: 'members.read' },
-  { to: '/attendance', label: 'Attendance', icon: <CalendarCheck className="h-5 w-5" />, cap: 'attendance.write' },
-  { to: '/giving', label: 'Giving', icon: <HandCoins className="h-5 w-5" />, cap: 'giving.read' },
-  { to: '/registrations', label: 'Sign-ups', icon: <Inbox className="h-5 w-5" />, cap: 'registrations.manage' },
-  { to: '/branches', label: 'Branches', icon: <Building2 className="h-5 w-5" />, cap: 'branches.manage' },
-  { to: '/departments', label: 'Departments', icon: <Network className="h-5 w-5" />, cap: 'departments.manage' },
-  { to: '/users', label: 'Users & roles', icon: <ShieldCheck className="h-5 w-5" />, cap: 'users.manage' },
+  { section: '', to: '/', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
+  { section: 'People', to: '/members', label: 'Members', icon: <Users className="h-5 w-5" />, cap: 'members.read' },
+  { section: 'People', to: '/registrations', label: 'Sign-ups', icon: <Inbox className="h-5 w-5" />, cap: 'registrations.manage' },
+  { section: 'People', to: '/attendance', label: 'Attendance', icon: <CalendarCheck className="h-5 w-5" />, cap: 'attendance.write' },
+  { section: 'Money', to: '/tithes', label: 'Tithes', icon: <Wallet className="h-5 w-5" />, cap: 'giving.read' },
+  { section: 'Money', to: '/giving', label: 'Giving & offerings', icon: <HandCoins className="h-5 w-5" />, cap: 'giving.read' },
+  { section: 'Ministry', to: '/departments', label: 'Departments', icon: <Network className="h-5 w-5" />, cap: 'departments.view' },
+  { section: 'Ministry', to: '/reports', label: 'Dept. reports', icon: <ClipboardList className="h-5 w-5" />, cap: 'reports.view' },
+  { section: 'Ministry', to: '/cells', label: 'Cells & growth', icon: <Home className="h-5 w-5" />, cap: 'cells.view' },
+  { section: 'Ministry', to: '/messages', label: 'SMS messages', icon: <MessageSquare className="h-5 w-5" />, cap: 'sms.send' },
+  { section: 'Admin', to: '/branches', label: 'Branches', icon: <Building2 className="h-5 w-5" />, cap: 'branches.manage' },
+  { section: 'Admin', to: '/users', label: 'Users & roles', icon: <ShieldCheck className="h-5 w-5" />, cap: 'users.manage' },
+  { section: 'Admin', to: '/database', label: 'Database', icon: <Database className="h-5 w-5" />, cap: 'data.manage' },
 ];
 
 export function Layout() {
@@ -55,10 +60,13 @@ export function Layout() {
         )}
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3">
-        {items.map((n) => (
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        {items.map((n, i) => (
+          <div key={n.to}>
+          {n.section && n.section !== items[i - 1]?.section && (
+            <div className="mb-1 mt-4 px-3 text-[11px] font-semibold uppercase tracking-wider text-royal-400">{n.section}</div>
+          )}
           <NavLink
-            key={n.to}
             to={n.to}
             end={n.to === '/'}
             onClick={() => setOpen(false)}
@@ -72,6 +80,7 @@ export function Layout() {
             {n.icon}
             {n.label}
           </NavLink>
+          </div>
         ))}
       </nav>
 

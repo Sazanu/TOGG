@@ -1,5 +1,5 @@
 import { createContext, forwardRef, useCallback, useContext, useEffect, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import { CheckCircle2, Loader2, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Trash2, X, XCircle } from 'lucide-react';
 
 export function cx(...c: (string | false | null | undefined)[]): string {
   return c.filter(Boolean).join(' ');
@@ -198,4 +198,8 @@ export function errorText(e: unknown): string {
     'permission-denied': 'You do not have permission to do that.',
   };
   return map[code] ?? (e instanceof Error ? e.message : 'Something went wrong.');
+}
+
+export function Trash() {
+  return <Trash2 className="h-4 w-4" />;
 }

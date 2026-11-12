@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, setDoc, getDoc, getDocs, collection, query, where, updateDoc, writeBatch, serverTimestamp, deleteDoc, increment, addDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, getDocs, collection, query, where, updateDoc, writeBatch, serverTimestamp, deleteDoc, increment, addDoc, Timestamp } from 'firebase/firestore';
 
 const env = await initializeTestEnvironment({
   projectId: 'demo-togg',
@@ -122,6 +122,95 @@ await t('pre-approved status rejected', () => assertFails(addDoc(collection(anon
 await t('anonymous cannot read sign-ups', () => assertFails(getDocs(collection(anon(), 'registrations'))));
 await t('secretary A reads A sign-ups', () => assertSucceeds(getDocs(query(collection(db('secA'), 'registrations'), where('branchId', '==', 'A'), where('status', '==', 'new')))));
 await t('anonymous cannot read members', () => assertFails(getDoc(doc(anon(), 'members/m1'))));
+
+console.log('Department heads & cells');
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const d = ctx.firestore();
+  await setDoc(doc(d, 'users/headMedia'), { ...base, role: 'dept_leader', branchId: 'A', departmentIds: ['media', 'sound'], active: true });
+  await setDoc(doc(d, 'users/cellLead'), { ...base, role: 'cell_leader', branchId: 'A', departmentIds: [], cellIds: ['c1'], active: true });
+  await setDoc(doc(d, 'cells/c1'), { name: 'Asokwa', branchId: 'A', departmentId: 'media' });
+  await setDoc(doc(d, 'cells/c2'), { name: 'Choir cell', branchId: 'A', departmentId: 'choir' });
+  await setDoc(doc(d, 'members/inMedia'), { firstName: 'Med', lastName: 'Ia', branchId: 'A', category: 'adult', status: 'active', departmentIds: ['media', 'choir'], cellId: null });
+  await setDoc(doc(d, 'members/inChoir'), { firstName: 'Cho', lastName: 'Ir', branchId: 'A', category: 'adult', status: 'active', departmentIds: ['choir'], cellId: 'c2' });
+});
+const dm = (o = {}) => ({ firstName: 'New', lastName: 'Member', branchId: 'A', category: 'adult', status: 'active', departmentIds: ['media'], ...o });
+await t('dept head registers a member into their department', () => assertSucceeds(addDoc(collection(db('headMedia'), 'members'), dm())));
+await t('dept head cannot register into another department', () => assertFails(addDoc(collection(db('headMedia'), 'members'), dm({ departmentIds: ['choir'] }))));
+await t('dept head cannot register into another branch', () => assertFails(addDoc(collection(db('headMedia'), 'members'), dm({ branchId: 'B' }))));
+await t('dept head edits a member of their department', () => assertSucceeds(updateDoc(doc(db('headMedia'), 'members/inMedia'), { phone: '0241', departmentIds: ['media', 'choir', 'sound'] })));
+await t("dept head cannot strip another department", () => assertFails(updateDoc(doc(db('headMedia'), 'members/inMedia'), { departmentIds: ['media', 'sound'] })));
+await t('dept head cannot edit members outside their departments', () => assertFails(updateDoc(doc(db('headMedia'), 'members/inChoir'), { phone: '1' })));
+await t('dept head cannot delete members', () => assertFails(deleteDoc(doc(db('headMedia'), 'members/inMedia'))));
+await t('dept head creates a cell under their department', () => assertSucceeds(setDoc(doc(db('headMedia'), 'cells/c3'), { name: 'New cell', branchId: 'A', departmentId: 'sound' })));
+await t('dept head cannot create a cell under another department', () => assertFails(setDoc(doc(db('headMedia'), 'cells/c4'), { name: 'X', branchId: 'A', departmentId: 'choir' })));
+await t('cell leader reads branch cells', () => assertSucceeds(getDocs(query(collection(db('cellLead'), 'cells'), where('branchId', '==', 'A')))));
+await t('cell leader cannot create cells', () => assertFails(setDoc(doc(db('cellLead'), 'cells/c9'), { name: 'X', branchId: 'A', departmentId: 'media' })));
+const rep = (o = {}) => ({ cellId: 'c1', branchId: 'A', departmentId: 'media', date: '2026-11-11', membersPresent: 8, firstTimers: 2, newConverts: 1, ...o });
+await t('cell leader submits a report for their cell', () => assertSucceeds(setDoc(doc(db('cellLead'), 'cellReports/r1'), rep())));
+await t('cell leader cannot report for another cell', () => assertFails(setDoc(doc(db('cellLead'), 'cellReports/r2'), rep({ cellId: 'c2', departmentId: 'choir' }))));
+await t('report branch/department must match the cell', () => assertFails(setDoc(doc(db('cellLead'), 'cellReports/r3'), rep({ departmentId: 'choir' }))));
+await t('cell leader lists own cell reports', () => assertSucceeds(getDocs(query(collection(db('cellLead'), 'cellReports'), where('cellId', '==', 'c1'), where('branchId', '==', 'A')))));
+await t("cell leader cannot list other cells' reports", () => assertFails(getDocs(query(collection(db('cellLead'), 'cellReports'), where('branchId', '==', 'A')))));
+await t('dept head reads branch cell reports', () => assertSucceeds(getDocs(query(collection(db('headMedia'), 'cellReports'), where('branchId', '==', 'A')))));
+await t('cell leader adds a new contact as a visitor in their cell', () => assertSucceeds(addDoc(collection(db('cellLead'), 'members'), dm({ status: 'visitor', departmentIds: [], cellId: 'c1' }))));
+await t('cell leader cannot add active members', () => assertFails(addDoc(collection(db('cellLead'), 'members'), dm({ departmentIds: [], cellId: 'c1' }))));
+await t('cell leader puts an existing member into their cell', () => assertSucceeds(updateDoc(doc(db('cellLead'), 'members/m1'), { cellId: 'c1', updatedAt: serverTimestamp() })));
+await t('cell leader removes them again', () => assertSucceeds(updateDoc(doc(db('cellLead'), 'members/m1'), { cellId: null, updatedAt: serverTimestamp() })));
+await t('cell leader cannot move someone into another cell', () => assertFails(updateDoc(doc(db('cellLead'), 'members/m1'), { cellId: 'c2' })));
+await t('cell leader cannot change other member fields', () => assertFails(updateDoc(doc(db('cellLead'), 'members/m1'), { cellId: 'c1', phone: '1' })));
+await t('usher cannot read cells', () => assertFails(getDocs(query(collection(db('ushA'), 'cells'), where('branchId', '==', 'A')))));
+
+console.log('Department reports');
+const rid = (dept, branch, type, month = '2026-11') => `${dept}_${branch}_${month}_${type}`;
+const dr = (dept, branch, type, o = {}) => ({ departmentId: dept, branchId: branch, month: '2026-11', type, status: 'draft', summary: 'x', lines: [], activities: [], ...o });
+await t('dept head reads a report that does not exist yet', () => assertSucceeds(getDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'budget')))));
+await t('dept head saves a draft budget', () => assertSucceeds(setDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'budget')), dr('media', 'A', 'budget'))));
+await t('dept head submits it', () => assertSucceeds(setDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'budget')), dr('media', 'A', 'budget', { status: 'submitted' }))));
+await t('dept head cannot approve their own', () => assertFails(setDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'budget')), dr('media', 'A', 'budget', { status: 'approved' }))));
+await t("dept head cannot write another department's report", () => assertFails(setDoc(doc(db('headMedia'), 'deptReports', rid('choir', 'A', 'report')), dr('choir', 'A', 'report'))));
+await t('report data must match its id', () => assertFails(setDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'plan')), dr('media', 'B', 'plan'))));
+await t('secretary cannot read reports', () => assertFails(getDoc(doc(db('secA'), 'deptReports', rid('media', 'A', 'budget')))));
+await t('branch pastor lists branch reports for the month', () => assertSucceeds(getDocs(query(collection(db('bpA'), 'deptReports'), where('branchId', '==', 'A'), where('month', '==', '2026-11')))));
+await t('branch pastor returns it with a comment', () => assertSucceeds(updateDoc(doc(db('bpA'), 'deptReports', rid('media', 'A', 'budget')), { status: 'returned', reviewComment: 'Too high', reviewedByName: 'P' })));
+await t('reviewer cannot change the content', () => assertFails(updateDoc(doc(db('bpA'), 'deptReports', rid('media', 'A', 'budget')), { summary: 'changed' })));
+await t('head pastor approves', () => assertSucceeds(updateDoc(doc(db('head'), 'deptReports', rid('media', 'A', 'budget')), { status: 'approved' })));
+await t('dept head cannot edit once approved', () => assertFails(setDoc(doc(db('headMedia'), 'deptReports', rid('media', 'A', 'budget')), dr('media', 'A', 'budget', { status: 'submitted' }))));
+
+console.log('SMS & settings');
+const sms = (o = {}) => ({ branchId: 'A', message: 'Hello', audience: { type: 'all', branchId: 'A' }, kind: 'instant', status: 'queued', label: 'x', ...o });
+await t('branch pastor sends SMS to their branch', () => assertSucceeds(addDoc(collection(db('bpA'), 'smsMessages'), sms())));
+await t('secretary schedules SMS', () => assertSucceeds(addDoc(collection(db('secA'), 'smsMessages'), sms({ status: 'scheduled', kind: 'scheduled', sendAt: Timestamp.now() }))));
+await t('branch user cannot text all branches', () => assertFails(addDoc(collection(db('bpA'), 'smsMessages'), sms({ branchId: null, audience: { type: 'all', branchId: null } }))));
+await t('branch user cannot aim audience at another branch', () => assertFails(addDoc(collection(db('bpA'), 'smsMessages'), sms({ audience: { type: 'branch', branchId: 'B' } }))));
+await t('cannot fake a sent status', () => assertFails(addDoc(collection(db('bpA'), 'smsMessages'), sms({ status: 'sent' }))));
+await t('usher / finance / dept head cannot send SMS', async () => {
+  await assertFails(addDoc(collection(db('ushA'), 'smsMessages'), sms()));
+  await assertFails(addDoc(collection(db('finA'), 'smsMessages'), sms()));
+  await assertFails(addDoc(collection(db('headMedia'), 'smsMessages'), sms()));
+});
+await t('head pastor texts every branch', () => assertSucceeds(addDoc(collection(db('head'), 'smsMessages'), sms({ branchId: null, audience: { type: 'all' } }))));
+await t('branch pastor sees own branch history', () => assertSucceeds(getDocs(query(collection(db('bpA'), 'smsMessages'), where('branchId', '==', 'A')))));
+await t('branch pastor creates a Peak Hour reminder', () => assertSucceeds(addDoc(collection(db('bpA'), 'programmes'), { branchId: 'A', title: 'Peak Hour Prayer', days: [1, 2], time: '05:00', audience: { type: 'all', branchId: 'A' }, active: true })));
+await t('only admins change SMS settings', async () => {
+  await assertFails(setDoc(doc(db('bpA'), 'settings/sms'), { provider: 'log' }));
+  await assertSucceeds(setDoc(doc(db('head'), 'settings/sms'), { provider: 'arkesel' }));
+});
+await t('SMS API key: admin can save it…', () => assertSucceeds(setDoc(doc(db('head'), 'secrets/sms'), { apiKey: 'secret' })));
+await t('…but nobody can read it back', async () => {
+  await assertFails(getDoc(doc(db('head'), 'secrets/sms')));
+  await assertFails(getDoc(doc(db('bpA'), 'secrets/sms')));
+});
+
+console.log('Accounts & counters');
+await t('super admin creates a staff account', () => assertSucceeds(setDoc(doc(db('head'), 'users/newstaff'), { ...base, role: 'secretary', branchId: 'A', active: true })));
+await t('associate cannot create a super admin', () => assertFails(setDoc(doc(db('assoc'), 'users/x1'), { ...base, role: 'head_pastor', branchId: null, active: true })));
+await t('branch pastor cannot create accounts', () => assertFails(setDoc(doc(db('bpA'), 'users/x2'), { ...base, role: 'usher', branchId: 'A', active: true })));
+await t('membership counter can only go up', async () => {
+  await assertSucceeds(setDoc(doc(db('secA'), 'meta/counters'), { memberSeq: 5 }));
+  await assertSucceeds(updateDoc(doc(db('headMedia'), 'meta/counters'), { memberSeq: 6 }));
+  await assertFails(updateDoc(doc(db('secA'), 'meta/counters'), { memberSeq: 2 }));
+  await assertFails(updateDoc(doc(db('ushA'), 'meta/counters'), { memberSeq: 7 }));
+});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup();

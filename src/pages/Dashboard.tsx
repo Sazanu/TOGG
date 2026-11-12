@@ -8,6 +8,10 @@ import { GIVING_TYPES, MONTHS, labelOf, money, monthRange, shortDate } from '../
 import { ROLE_LABELS, can, isGlobal } from '../lib/roles';
 import { useServices } from './Attendance';
 import { useGifts } from './Giving';
+import { useCellReports, useMyCells } from './Cells';
+import { useMonthReports } from './Reports';
+import { isoDate, monthKey, monthLabel } from '../lib/format';
+import { ClipboardList, Home, Sprout } from 'lucide-react';
 import type { Service } from '../lib/types';
 
 function greeting() {
@@ -17,8 +21,10 @@ function greeting() {
 
 export default function Dashboard() {
   const { profile } = useAuth();
-  const { members, branches, departments, scope, branchName } = useData();
+  const { members: allMembers, branches, departments, scope, branchName } = useData();
   const role = profile?.role;
+  // Department heads see their own departments' people.
+  const members = role === 'dept_leader' ? allMembers.filter((m) => m.departmentIds?.some((d) => profile?.departmentIds.includes(d))) : allMembers;
   const TITLES = /^(rev|revd|pastor|ps|apostle|bishop|prophet|evangelist|elder|deacon|deaconess|dr|mr|mrs|ms|miss|bro|sis|brother|sister)\.?$/i;
   const first = (profile?.displayName ?? '').split(/\s+/).find((w) => w && !TITLES.test(w)) ?? '';
 
@@ -40,7 +46,7 @@ export default function Dashboard() {
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {can(role, 'members.read') && (
           <Stat label="Members" value={members.filter((m) => m.status !== 'visitor').length} icon={<Users className="h-4 w-4" />}
-            sub={`${members.filter((m) => m.category === 'adult').length} adults · ${members.filter((m) => m.category === 'teen').length} teens · ${members.filter((m) => m.category === 'child').length} children`} />
+            sub={`${members.filter((m) => m.status !== 'visitor' && m.category === 'adult').length} adults · ${members.filter((m) => m.status !== 'visitor' && m.category === 'teen').length} teens · ${members.filter((m) => m.status !== 'visitor' && m.category === 'child').length} children · ${members.filter((m) => m.status === 'visitor').length} visitors`} />
         )}
         {can(role, 'members.read') && (
           <Stat label="New this month" value={members.filter((m) => m.joinedAt >= start && m.joinedAt <= end).length} icon={<UserPlus className="h-4 w-4" />} sub={`Joined in ${MONTHS[now.getMonth()]}`} />
@@ -72,6 +78,8 @@ export default function Dashboard() {
             </ul>
           </Card>
         )}
+        {can(role, 'reports.view') && <ReportsWidget />}
+        {can(role, 'cells.view') && <CellsWidget />}
         {can(role, 'members.read') && <Birthdays />}
       </div>
     </div>
@@ -211,6 +219,59 @@ function SetupChecklist({ branches, departments, members }: { branches: number; 
             </Link>
           </li>
         ))}
+      </ul>
+    </Card>
+  );
+}
+
+function ReportsWidget() {
+  const { profile } = useAuth();
+  const { scope, departments } = useData();
+  const month = monthKey();
+  const isHead = profile?.role === 'dept_leader';
+  const branch = profile?.branchId ?? scope;
+  const reports = useMonthReports(month, branch, isHead ? profile?.departmentIds ?? [] : null) ?? [];
+  const by = (st: string) => reports.filter((r) => r.status === st).length;
+  const expected = (isHead ? profile?.departmentIds.length ?? 0 : departments.length) * 3;
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-semibold text-stone-900"><ClipboardList className="h-4 w-4 text-royal-600" /> Dept. reports · {monthLabel(month)}</h2>
+        <Link to="/reports" className="text-xs text-royal-700 hover:underline">Open</Link>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-xl bg-gold-50 py-3"><div className="font-display text-xl font-bold text-gold-700">{by('submitted')}</div><div className="text-[11px] text-stone-500">{isHead ? 'Submitted' : 'To review'}</div></div>
+        <div className="rounded-xl bg-emerald-50 py-3"><div className="font-display text-xl font-bold text-emerald-700">{by('approved')}</div><div className="text-[11px] text-stone-500">Approved</div></div>
+        <div className="rounded-xl bg-red-50 py-3"><div className="font-display text-xl font-bold text-red-700">{by('returned')}</div><div className="text-[11px] text-stone-500">Returned</div></div>
+      </div>
+      {branch !== ALL && <p className="mt-3 text-xs text-stone-500">{reports.filter((r) => r.status !== 'draft').length} of {expected} reports, budgets and plans in.</p>}
+    </Card>
+  );
+}
+
+function CellsWidget() {
+  const { profile } = useAuth();
+  const { scope, members } = useData();
+  const { cells, ids } = useMyCells();
+  const month = monthKey();
+  const now = new Date();
+  const reports = useCellReports(profile?.branchId ?? scope, `${month}-01`, isoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)), ids);
+  const mine = new Set(cells.map((c) => c.id));
+  const rs = reports.filter((r) => mine.has(r.cellId));
+  const ft = rs.reduce((t, r) => t + r.firstTimers, 0);
+  const cv = rs.reduce((t, r) => t + r.newConverts, 0);
+  const joined = members.filter((m) => m.source === 'cell' && m.joinedAt.startsWith(month) && !!m.cellId && mine.has(m.cellId)).length;
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-semibold text-stone-900"><Home className="h-4 w-4 text-gold-600" /> Cell growth · {MONTHS[now.getMonth()]}</h2>
+        <Link to="/cells" className="text-xs text-royal-700 hover:underline">Open</Link>
+      </div>
+      <ul className="space-y-2 text-sm">
+        <li className="flex justify-between"><span className="text-stone-600">Meetings held</span><b>{rs.length} <span className="font-normal text-stone-400">/ {cells.length} cells</span></b></li>
+        <li className="flex justify-between"><span className="text-stone-600">First-timers</span><b className="text-gold-700">{ft}</b></li>
+        <li className="flex justify-between"><span className="text-stone-600">New converts</span><b className="text-royal-700">{cv}</b></li>
+        <li className="flex justify-between"><span className="flex items-center gap-1 text-stone-600"><Sprout className="h-3.5 w-3.5 text-emerald-600" /> Added to church</span><b className="text-emerald-700">{joined}</b></li>
       </ul>
     </Card>
   );

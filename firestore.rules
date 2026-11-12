@@ -2,13 +2,15 @@ rules_version = '2';
 
 // TOGG — Throne of God's Grace
 // Role model (keep in sync with src/lib/roles.ts):
-//   head_pastor, associate_pastor ......... every branch, everything
-//   branch_pastor ......................... own branch: members, attendance, giving, sign-ups
-//   secretary ............................. own branch: members, attendance, sign-ups
-//   finance ............................... own branch: giving (+ read members)
-//   usher ................................. own branch: attendance (+ read members, add first-time visitors)
-//   dept_leader ........................... own branch: read members
-//   pending ............................... nothing until approved
+//   head_pastor (super admin), associate_pastor ... every branch, everything
+//   branch_pastor ................................. own branch: members, attendance, tithes/giving, cells, SMS, reviews reports
+//   secretary ..................................... own branch: members, attendance, sign-ups, cells, SMS
+//   finance ....................................... own branch: tithes/giving (+ read members)
+//   usher ......................................... own branch: attendance (+ read members, add first-time visitors)
+//   dept_leader (department head) ................. own branch: register/edit members of own departments, run their cells,
+//                                                   submit monthly report / budget / plan
+//   cell_leader ................................... own branch: reports for own cells, add new contacts as visitors
+//   pending ....................................... nothing until approved
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -21,27 +23,47 @@ service cloud.firestore {
     }
     function isGlobal() { return activeUser() && me().role in ['head_pastor', 'associate_pastor']; }
     function isHead() { return activeUser() && me().role == 'head_pastor'; }
+    function roleIn(role, branchId) { return activeUser() && me().role == role && me().branchId == branchId; }
     function hasRole(branchId, roles) {
       return activeUser() && (isGlobal() || (me().branchId == branchId && me().role in roles));
     }
+    function myDepts() { return me().get('departmentIds', []); }
+    function myCells() { return me().get('cellIds', []); }
+    function cellData(id) { return get(/databases/$(database)/documents/cells/$(id)).data; }
 
-    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader']); }
+    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'cell_leader']); }
     function canWriteMembers(b) { return hasRole(b, ['branch_pastor', 'secretary']); }
     function canAttendance(b)   { return hasRole(b, ['branch_pastor', 'secretary', 'usher']); }
     function canGiving(b)       { return hasRole(b, ['branch_pastor', 'finance']); }
     function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']); }
+    function canSms(b)          { return isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary'])); }
 
     function validRole(r) {
-      return r in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'pending'];
+      return r in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'cell_leader', 'pending'];
+    }
+    function validAccess(d) {
+      return validRole(d.role)
+        && (d.role in ['head_pastor', 'associate_pastor', 'pending'] || d.branchId is string)
+        && (isHead() || !(d.role in ['head_pastor', 'associate_pastor']));
     }
 
-    // ---------- first-run bootstrap ----------
+    // ---------- first-run bootstrap & counters ----------
     match /meta/setup {
       allow read: if signedIn();
       allow create: if signedIn()
         && request.resource.data.by == request.auth.uid
         && getAfter(userPath(request.auth.uid)).data.role == 'head_pastor';
       allow update, delete: if false;
+    }
+    // Membership / tithe card numbers (TOGG-0001…). Can only go up.
+    match /meta/counters {
+      allow read: if activeUser();
+      allow create, update: if activeUser()
+        && me().role in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'dept_leader']
+        && request.resource.data.keys().hasOnly(['memberSeq'])
+        && request.resource.data.memberSeq is int
+        && request.resource.data.memberSeq > (resource == null ? 0 : resource.data.memberSeq)
+        && request.resource.data.memberSeq - (resource == null ? 0 : resource.data.memberSeq) <= 5000;
     }
 
     // ---------- users & roles ----------
@@ -60,24 +82,24 @@ service cloud.firestore {
               && existsAfter(/databases/$(database)/documents/meta/setup))
         );
 
-      // Anyone may edit their own name / phone.
+      // Super admin / admin creates a staff account directly.
+      allow create: if isGlobal() && request.auth.uid != uid && validAccess(request.resource.data)
+        && request.resource.data.displayName is string;
+
       allow update: if signedIn() && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'phone']);
 
-      // Head / associate pastor manage everyone else.
-      // The associate pastor cannot touch or create head/associate pastors.
       allow update: if isGlobal() && request.auth.uid != uid
-        && validRole(request.resource.data.role)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'active'])
-        && (request.resource.data.role in ['head_pastor', 'associate_pastor', 'pending'] || request.resource.data.branchId is string)
-        && (isHead() || !(resource.data.role in ['head_pastor', 'associate_pastor'] || request.resource.data.role in ['head_pastor', 'associate_pastor']));
+        && validAccess(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active'])
+        && (isHead() || !(resource.data.role in ['head_pastor', 'associate_pastor']));
 
       allow delete: if isHead() && request.auth.uid != uid;
     }
 
     // ---------- church structure ----------
     match /branches/{id} {
-      allow read: if true; // names/locations are shown on the public sign-up forms
+      allow read: if true; // shown on the public sign-up forms
       allow write: if isGlobal();
     }
 
@@ -94,16 +116,43 @@ service cloud.firestore {
         && d.status in ['active', 'inactive', 'visitor']
         && d.departmentIds is list;
     }
+    function deptChangeOk(before, after) {
+      // a department head may only add/remove their own departments
+      return after.toSet().difference(before.toSet()).hasOnly(myDepts().toSet())
+        && before.toSet().difference(after.toSet()).hasOnly(myDepts().toSet());
+    }
+    function cellIsMine(cellId) {
+      return cellId is string && (
+        (me().role == 'cell_leader' && cellId in myCells())
+        || (me().role == 'dept_leader' && cellData(cellId).departmentId in myDepts())
+      );
+    }
 
     match /members/{id} {
       allow read: if canReadMembers(resource.data.branchId);
+
       allow create: if validMember(request.resource.data) && (
         canWriteMembers(request.resource.data.branchId)
         || (canAttendance(request.resource.data.branchId) && request.resource.data.status == 'visitor')
+        || (roleIn('dept_leader', request.resource.data.branchId) && request.resource.data.departmentIds.hasAny(myDepts()))
+        || (activeUser() && me().branchId == request.resource.data.branchId && request.resource.data.status == 'visitor'
+            && cellIsMine(request.resource.data.get('cellId', null)))
       );
-      allow update: if validMember(request.resource.data)
-        && canWriteMembers(resource.data.branchId)
-        && canWriteMembers(request.resource.data.branchId);
+
+      allow update: if validMember(request.resource.data) && (
+        (canWriteMembers(resource.data.branchId) && canWriteMembers(request.resource.data.branchId))
+        // department head: members of their departments, same branch
+        || (roleIn('dept_leader', resource.data.branchId)
+            && request.resource.data.branchId == resource.data.branchId
+            && resource.data.departmentIds.hasAny(myDepts())
+            && deptChangeOk(resource.data.departmentIds, request.resource.data.departmentIds))
+        // cell / department head: put someone in, or take them out of, their cell
+        || (activeUser() && me().branchId == resource.data.branchId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['cellId', 'updatedAt'])
+            && (cellIsMine(request.resource.data.cellId)
+                || (request.resource.data.cellId == null && cellIsMine(resource.data.get('cellId', null)))))
+      );
+
       allow delete: if canWriteMembers(resource.data.branchId);
     }
 
@@ -117,17 +166,18 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count', 'visitors', 'title', 'type', 'date'])
         && request.resource.data.visitors >= 0;
       allow delete: if canWriteMembers(resource.data.branchId);
+      allow create, update: if isGlobal(); // restore from backup
 
       match /checkins/{mid} {
         function svcBranch() { return get(/databases/$(database)/documents/services/$(sid)).data.branchId; }
         allow read: if canAttendance(svcBranch());
         allow create: if canAttendance(svcBranch()) && request.resource.data.memberId == mid;
         allow delete: if canAttendance(svcBranch());
-        allow update: if false;
+        allow update: if isGlobal();
       }
     }
 
-    // ---------- giving ----------
+    // ---------- tithes & giving ----------
     match /giving/{id} {
       allow read: if canGiving(resource.data.branchId);
       allow create, update: if canGiving(request.resource.data.branchId)
@@ -136,6 +186,95 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.type is string;
       allow delete: if canGiving(resource.data.branchId);
+    }
+
+    // ---------- cells ----------
+    function canManageCell(d) {
+      return canWriteMembers(d.branchId) || (roleIn('dept_leader', d.branchId) && d.departmentId in myDepts());
+    }
+    match /cells/{id} {
+      allow read: if hasRole(resource.data.branchId, ['branch_pastor', 'secretary', 'dept_leader', 'cell_leader']);
+      allow create: if canManageCell(request.resource.data) && request.resource.data.name is string;
+      allow update: if canManageCell(resource.data) && canManageCell(request.resource.data);
+      allow delete: if canManageCell(resource.data);
+    }
+
+    match /cellReports/{id} {
+      function canReport(d) {
+        return d.cellId is string
+          && cellData(d.cellId).branchId == d.branchId
+          && cellData(d.cellId).departmentId == d.departmentId
+          && (canWriteMembers(d.branchId)
+              || (roleIn('dept_leader', d.branchId) && d.departmentId in myDepts())
+              || (roleIn('cell_leader', d.branchId) && d.cellId in myCells()));
+      }
+      allow read: if hasRole(resource.data.branchId, ['branch_pastor', 'secretary', 'dept_leader'])
+        || (roleIn('cell_leader', resource.data.branchId) && resource.data.cellId in myCells());
+      allow create: if canReport(request.resource.data);
+      allow update: if canReport(resource.data) && canReport(request.resource.data);
+      allow delete: if canWriteMembers(resource.data.branchId) || (roleIn('dept_leader', resource.data.branchId) && resource.data.departmentId in myDepts());
+      allow create, update: if isGlobal();
+    }
+
+    // ---------- department reports, budgets & plans ----------
+    // id = {departmentId}_{branchId}_{YYYY-MM}_{report|budget|plan}
+    match /deptReports/{id} {
+      function part(i) { return id.split('_')[i]; }
+      function isAuthor() {
+        return isGlobal() || (roleIn('dept_leader', part(1)) && part(0) in myDepts());
+      }
+      function isReviewer() { return isGlobal() || roleIn('branch_pastor', part(1)); }
+      function matchesId(d) {
+        return d.departmentId == part(0) && d.branchId == part(1) && d.month == part(2) && d.type == part(3)
+          && d.type in ['report', 'budget', 'plan'];
+      }
+      allow get: if isAuthor() || isReviewer();
+      allow list: if isGlobal() || roleIn('branch_pastor', resource.data.branchId);
+      allow create: if isAuthor() && matchesId(request.resource.data) && request.resource.data.status in ['draft', 'submitted'];
+      allow update: if isAuthor() && matchesId(request.resource.data)
+        && request.resource.data.status in ['draft', 'submitted']
+        && (isGlobal() || resource.data.status != 'approved');
+      allow update: if isReviewer()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewComment', 'reviewedByName', 'reviewedBy', 'reviewedAt'])
+        && request.resource.data.status in ['approved', 'returned'];
+      allow delete: if isGlobal();
+      allow create, update: if isGlobal() && matchesId(request.resource.data);
+    }
+
+    // ---------- SMS ----------
+    match /smsMessages/{id} {
+      allow read: if canSms(resource.data.branchId);
+      allow create: if canSms(request.resource.data.branchId)
+        && request.resource.data.status in ['queued', 'scheduled']
+        && request.resource.data.kind in ['instant', 'scheduled']
+        && request.resource.data.message is string && request.resource.data.message.size() > 0 && request.resource.data.message.size() <= 918
+        && (isGlobal() || request.resource.data.audience.branchId == request.resource.data.branchId);
+      allow update: if canSms(resource.data.branchId) && resource.data.status == 'scheduled'
+        && request.resource.data.status == 'cancelled'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if isGlobal();
+    }
+
+    match /programmes/{id} {
+      function okProgramme(d) {
+        return canSms(d.branchId) && (isGlobal() || d.audience.branchId == d.branchId)
+          && d.title is string && d.days is list && d.time is string;
+      }
+      allow read: if canSms(resource.data.branchId);
+      allow create: if okProgramme(request.resource.data);
+      allow update: if canSms(resource.data.branchId) && okProgramme(request.resource.data);
+      allow delete: if canSms(resource.data.branchId);
+    }
+
+    match /settings/{id} {
+      allow read: if activeUser();
+      allow write: if isGlobal();
+    }
+
+    // SMS API key: admins can set it, nobody can read it back (only the server).
+    match /secrets/{id} {
+      allow read: if false;
+      allow write: if isGlobal();
     }
 
     // ---------- public sign-up forms ----------
@@ -156,6 +295,7 @@ service cloud.firestore {
       allow read, delete: if canSignups(resource.data.branchId);
       allow update: if canSignups(resource.data.branchId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'processedAt']);
+      allow create, update: if isGlobal() && request.resource.data.status in ['new', 'done'];
     }
 
     match /{document=**} {

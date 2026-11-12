@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { collection, onSnapshot, orderBy, query, where, type Query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import type { Branch, Department, Member } from '../lib/types';
+import type { Branch, Cell, Department, Member } from '../lib/types';
 import { can, isGlobal } from '../lib/roles';
 import { useAuth } from './AuthContext';
 
@@ -10,6 +10,9 @@ export const ALL = 'all';
 interface DataState {
   branches: Branch[];
   departments: Department[];
+  /** Main departments first, each followed by its sub-departments. */
+  deptTree: { dept: Department; depth: number }[];
+  cells: Cell[];
   members: Member[];
   membersLoading: boolean;
   /** 'all' (head/associate pastor only) or a branch id. */
@@ -19,6 +22,9 @@ interface DataState {
   canSwitchScope: boolean;
   branchName: (id: string | null | undefined) => string;
   deptName: (id: string) => string;
+  cellName: (id: string | null | undefined) => string;
+  /** A department id plus all of its sub-department ids. */
+  deptWithChildren: (id: string) => string[];
   memberById: Map<string, Member>;
 }
 
@@ -31,6 +37,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [cells, setCells] = useState<Cell[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const global = isGlobal(profile?.role);
   const [scopeState, setScopeState] = useState<string>(() => {
@@ -64,6 +71,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [branches, global, scopeState]);
 
   useEffect(() => {
+    if (!profile?.active || !can(profile.role, 'cells.view')) { setCells([]); return; }
+    const base = collection(db, 'cells');
+    const q: Query = scope === ALL ? base : query(base, where('branchId', '==', scope));
+    return onSnapshot(q, (s) => {
+      const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Cell);
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      setCells(list);
+    }, (e) => console.error('cells listener', e));
+  }, [profile?.active, profile?.role, scope]);
+
+  useEffect(() => {
     if (!profile?.active || !can(profile.role, 'members.read')) {
       setMembers([]);
       setMembersLoading(false);
@@ -90,21 +108,43 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<DataState>(() => {
     const bMap = new Map(branches.map((b) => [b.id, b.name]));
-    const dMap = new Map(departments.map((d) => [d.id, d.name]));
+    const dMap = new Map(departments.map((d) => [d.id, d]));
+    const cMap = new Map(cells.map((c) => [c.id, c.name]));
+    const kids = new Map<string, Department[]>();
+    departments.forEach((d) => { if (d.parentId) kids.set(d.parentId, [...(kids.get(d.parentId) ?? []), d]); });
+    const deptTree: { dept: Department; depth: number }[] = [];
+    const walk = (d: Department, depth: number, seen: Set<string>) => {
+      if (seen.has(d.id)) return;
+      seen.add(d.id);
+      deptTree.push({ dept: d, depth });
+      (kids.get(d.id) ?? []).forEach((k) => walk(k, depth + 1, seen));
+    };
+    const seen = new Set<string>();
+    departments.filter((d) => !d.parentId || !dMap.has(d.parentId)).forEach((d) => walk(d, 0, seen));
+    const withChildren = (id: string): string[] => {
+      const out: string[] = [];
+      const go = (x: string) => { if (out.includes(x)) return; out.push(x); (kids.get(x) ?? []).forEach((k) => go(k.id)); };
+      go(id);
+      return out;
+    };
     return {
       branches,
       departments,
+      deptTree,
+      cells,
       members,
       membersLoading,
       scope,
       setScope,
       canSwitchScope: global,
       branchName: (id) => (id ? bMap.get(id) ?? 'Unknown branch' : 'All branches'),
-      deptName: (id) => dMap.get(id) ?? '—',
+      deptName: (id) => dMap.get(id)?.name ?? '—',
+      cellName: (id) => (id ? cMap.get(id) ?? '—' : '—'),
+      deptWithChildren: withChildren,
       memberById: new Map(members.map((m) => [m.id, m])),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branches, departments, members, membersLoading, scope, global]);
+  }, [branches, departments, cells, members, membersLoading, scope, global]);
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

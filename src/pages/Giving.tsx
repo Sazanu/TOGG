@@ -200,17 +200,17 @@ export default function Giving() {
   );
 }
 
-function RecordGift({ onClose }: { onClose: () => void }) {
+export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: { type?: GivingType; memberId?: string; memberName?: string; branchId?: string } }) {
   const { profile } = useAuth();
   const { branches, members, scope, branchName } = useData();
   const toast = useToast();
-  const [branchId, setBranchId] = useState(profile?.branchId ?? (scope !== ALL ? scope : branches[0]?.id ?? ''));
+  const [branchId, setBranchId] = useState(profile?.branchId ?? preset?.branchId ?? (scope !== ALL ? scope : branches[0]?.id ?? ''));
   const [date, setDate] = useState(today());
-  const [type, setType] = useState<GivingType>('tithe');
+  const [type, setType] = useState<GivingType>(preset?.type ?? 'tithe');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [amount, setAmount] = useState('');
-  const [who, setWho] = useState('');
-  const [memberId, setMemberId] = useState<string | null>(null);
+  const [who, setWho] = useState(preset?.memberName ?? '');
+  const [memberId, setMemberId] = useState<string | null>(preset?.memberId ?? null);
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -248,7 +248,7 @@ function RecordGift({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal open onClose={onClose} title="Record giving">
+    <Modal open onClose={onClose} title={preset?.type === 'tithe' ? 'Record tithe' : 'Record giving'}>
       <form onSubmit={save} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <Field label="Type">

@@ -19,6 +19,13 @@ import Pending from './pages/Pending';
 import PublicForm from './pages/PublicForm';
 import Registrations from './pages/Registrations';
 import Users from './pages/Users';
+import Tithes from './pages/Tithes';
+import Reports, { ReportEditor } from './pages/Reports';
+import DepartmentDetail from './pages/DepartmentDetail';
+import Cells from './pages/Cells';
+import CellDetail from './pages/CellDetail';
+import Messages from './pages/Messages';
+import Database from './pages/Database';
 
 function Guard({ cap, children }: { cap: Capability; children: ReactNode }) {
   const { profile } = useAuth();
@@ -42,7 +49,15 @@ function Private() {
           <Route path="giving" element={<Guard cap="giving.read"><Giving /></Guard>} />
           <Route path="registrations" element={<Guard cap="registrations.manage"><Registrations /></Guard>} />
           <Route path="branches" element={<Guard cap="branches.manage"><Branches /></Guard>} />
-          <Route path="departments" element={<Guard cap="departments.manage"><Departments /></Guard>} />
+          <Route path="departments" element={<Guard cap="departments.view"><Departments /></Guard>} />
+          <Route path="departments/:id" element={<Guard cap="departments.view"><DepartmentDetail /></Guard>} />
+          <Route path="tithes" element={<Guard cap="giving.read"><Tithes /></Guard>} />
+          <Route path="reports" element={<Guard cap="reports.view"><Reports /></Guard>} />
+          <Route path="reports/edit" element={<Guard cap="reports.view"><ReportEditor /></Guard>} />
+          <Route path="cells" element={<Guard cap="cells.view"><Cells /></Guard>} />
+          <Route path="cells/:id" element={<Guard cap="cells.view"><CellDetail /></Guard>} />
+          <Route path="messages" element={<Guard cap="sms.send"><Messages /></Guard>} />
+          <Route path="database" element={<Guard cap="data.manage"><Database /></Guard>} />
           <Route path="users" element={<Guard cap="users.manage"><Users /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

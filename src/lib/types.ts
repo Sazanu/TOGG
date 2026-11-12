@@ -8,8 +8,10 @@ export interface AppUser {
   role: Role;
   /** Branch the user is limited to. null for head / associate pastor (all branches). */
   branchId: string | null;
-  /** Departments a department leader looks after. */
+  /** Departments a department head looks after. */
   departmentIds: string[];
+  /** Cells a cell leader looks after. */
+  cellIds?: string[];
   active: boolean;
   createdAt?: unknown;
 }
@@ -27,7 +29,11 @@ export interface Department {
   id: string;
   name: string;
   description: string;
-  leaderName: string;
+  /** null = main department; otherwise the id of its parent department. */
+  parentId: string | null;
+  headName: string;
+  headPhone: string;
+  assistantName: string;
 }
 
 export type MemberCategory = 'adult' | 'teen' | 'child';
@@ -50,6 +56,10 @@ export interface Member {
   maritalStatus: string;
   joinedAt: string; // YYYY-MM-DD
   notes: string;
+  membershipNo?: string;
+  cellId?: string | null;
+  /** How they came in: manual, import, registration, cell, checkin */
+  source?: string;
 }
 
 export interface Service {
@@ -101,4 +111,122 @@ export interface Registration {
   prayerRequest: string;
   status: 'new' | 'done';
   createdAt?: { toDate(): Date } | null;
+}
+
+export interface Cell {
+  id: string;
+  name: string;
+  branchId: string;
+  departmentId: string;
+  leaderName: string;
+  leaderPhone: string;
+  location: string;
+  meetingDay: string;
+  meetingTime: string;
+  active: boolean;
+}
+
+export interface NewContact { name: string; phone: string; addedAsMember?: boolean }
+
+export interface CellReport {
+  id: string;
+  cellId: string;
+  branchId: string;
+  departmentId: string;
+  date: string;
+  topic: string;
+  membersPresent: number;
+  firstTimers: number;
+  newConverts: number;
+  offering: number;
+  testimonies: string;
+  challenges: string;
+  newContacts: NewContact[];
+  submittedByName: string;
+}
+
+export type DeptReportType = 'report' | 'budget' | 'plan';
+export type DeptReportStatus = 'draft' | 'submitted' | 'approved' | 'returned';
+
+export interface BudgetLine { item: string; amount: number }
+export interface PlannedActivity { date: string; title: string; details: string; cost: number }
+
+export interface DeptReport {
+  id: string;
+  departmentId: string;
+  branchId: string;
+  month: string; // YYYY-MM
+  type: DeptReportType;
+  status: DeptReportStatus;
+  // monthly report
+  summary: string;
+  achievements: string;
+  challenges: string;
+  membersActive: number;
+  newMembers: number;
+  recommendations: string;
+  // budget
+  lines: BudgetLine[];
+  // plan
+  activities: PlannedActivity[];
+  submittedByName: string;
+  reviewComment: string;
+  reviewedByName: string;
+  updatedAt?: { toDate(): Date } | null;
+}
+
+export type AudienceType = 'all' | 'branch' | 'department' | 'cell' | 'category' | 'absentees' | 'custom';
+
+export interface Audience {
+  type: AudienceType;
+  branchId?: string | null;
+  departmentId?: string;
+  cellId?: string;
+  category?: MemberCategory;
+  serviceId?: string;
+  phones?: string[];
+  includeVisitors?: boolean;
+}
+
+export interface SmsMessage {
+  id: string;
+  branchId: string | null;
+  message: string;
+  audience: Audience;
+  kind: 'instant' | 'scheduled' | 'automated';
+  label: string;
+  status: 'queued' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'cancelled';
+  sendAt?: { toDate(): Date; toMillis(): number } | null;
+  recipientsCount?: number;
+  sentCount?: number;
+  failedCount?: number;
+  error?: string;
+  createdByName?: string;
+  createdAt?: { toDate(): Date } | null;
+}
+
+export interface Programme {
+  id: string;
+  branchId: string | null;
+  title: string;
+  link: string;
+  message: string;
+  days: number[]; // 0 = Sunday
+  time: string; // HH:MM, Ghana time
+  remindMinutesBefore: number;
+  audience: Audience;
+  active: boolean;
+  lastSentOn?: string;
+}
+
+export interface SmsSettings {
+  provider: 'arkesel' | 'hubtel' | 'mnotify' | 'log';
+  senderId: string;
+  absenteeEnabled: boolean;
+  absenteeTemplate: string;
+  absenteeServiceTypes: string[];
+  absenteeHour: number; // 0-23, Ghana time, day of the service
+  birthdayEnabled: boolean;
+  birthdayTemplate: string;
+  churchName: string;
 }

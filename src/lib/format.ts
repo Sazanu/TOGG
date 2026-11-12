@@ -92,3 +92,34 @@ export function ageFrom(dob: string): number | null {
   if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--;
   return age;
 }
+
+export function monthKey(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  return `${MONTHS[m - 1]} ${y}`;
+}
+
+export function shiftMonth(key: string, delta: number): string {
+  const [y, m] = key.split('-').map(Number);
+  return monthKey(new Date(y, m - 1 + delta, 1));
+}
+
+export const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Fills {firstName}, {name}, {link}, {church}, {title}, {time} in an SMS template. */
+export function fillTemplate(t: string, vars: Record<string, string>): string {
+  return t.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
+}
+
+/** SMS segments: 160 chars for one, 153 per part after that (GSM-7). */
+export function smsParts(text: string): number {
+  const n = text.length;
+  return n <= 160 ? 1 : Math.ceil(n / 153);
+}
+
+export function fullName(m: { firstName: string; lastName: string }): string {
+  return `${m.firstName} ${m.lastName}`.trim();
+}

@@ -6,6 +6,7 @@ import { Avatar, Badge, Button, Card, Empty, Modal, PageHeader, Spinner, errorTe
 import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import { today } from '../lib/format';
+import { reserveMembershipNos } from '../lib/counters';
 import type { Registration } from '../lib/types';
 
 export default function Registrations() {
@@ -33,8 +34,10 @@ export default function Registrations() {
 
   async function approve(r: Registration) {
     try {
+      const membershipNo = r.kind === 'member' ? (await reserveMembershipNos(1))[0] : '';
       const batch = writeBatch(db);
       batch.set(doc(collection(db, 'members')), {
+        membershipNo, cellId: null, source: 'registration',
         firstName: r.firstName, lastName: r.lastName, phone: r.phone, email: r.email,
         gender: r.gender === 'male' || r.gender === 'female' ? r.gender : '', dob: '', category: r.category,
         status: r.kind === 'visitor' ? 'visitor' : 'active', branchId: r.branchId, departmentIds: [],

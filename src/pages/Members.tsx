@@ -1,10 +1,12 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
 import { Download, Pencil, Plus, Search, Trash2, Upload, Users } from 'lucide-react';
+import { ImportWizard, type ImportField } from '../components/ImportWizard';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Spinner, Stat, Textarea, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
-import { downloadCsv, parseCsv } from '../lib/csv';
+import { downloadExcel, normalizePhone, parseDateLoose } from '../lib/csv';
+import { reserveMembershipNos } from '../lib/counters';
 import { db } from '../lib/firebase';
 import { ageFrom, initials, prettyDate, today } from '../lib/format';
 import { can } from '../lib/roles';
@@ -15,28 +17,49 @@ const STATUS_COLOR: Record<MemberStatus, 'green' | 'gray' | 'gold'> = { active: 
 
 type Draft = Omit<Member, 'id'>;
 
-function emptyDraft(branchId: string): Draft {
+export function emptyMember(branchId: string): Draft {
   return {
     firstName: '', lastName: '', phone: '', email: '', gender: '', dob: '', category: 'adult', status: 'active',
     branchId, departmentIds: [], address: '', occupation: '', maritalStatus: '', joinedAt: today(), notes: '',
+    membershipNo: '', cellId: null, source: 'manual',
   };
 }
 
+const MEMBER_FIELDS: ImportField[] = [
+  { key: 'name', label: 'Full name', aliases: ['fullname', 'name', 'membername', 'names'] },
+  { key: 'firstName', label: 'First name', aliases: ['firstname', 'othernames', 'givenname', 'forename'] },
+  { key: 'lastName', label: 'Last name', aliases: ['lastname', 'surname', 'familyname'] },
+  { key: 'phone', label: 'Phone', aliases: ['phone', 'phonenumber', 'mobile', 'contact', 'telephone', 'tel', 'mobilenumber'] },
+  { key: 'email', label: 'Email', aliases: ['email', 'emailaddress'] },
+  { key: 'gender', label: 'Gender', aliases: ['gender', 'sex'] },
+  { key: 'dob', label: 'Date of birth', aliases: ['dob', 'dateofbirth', 'birthday', 'birthdate'] },
+  { key: 'category', label: 'Age group', aliases: ['category', 'agegroup', 'group'] },
+  { key: 'departments', label: 'Department(s)', aliases: ['department', 'departments', 'ministry', 'ministries'] },
+  { key: 'membershipNo', label: 'Membership / tithe no.', aliases: ['membershipno', 'membershipnumber', 'memberno', 'titheno', 'tithecardno', 'cardno', 'id'] },
+  { key: 'address', label: 'Address / area', aliases: ['address', 'location', 'residence', 'area', 'hometown'] },
+  { key: 'occupation', label: 'Occupation', aliases: ['occupation', 'profession', 'work', 'job'] },
+  { key: 'maritalStatus', label: 'Marital status', aliases: ['maritalstatus', 'marital'] },
+  { key: 'joinedAt', label: 'Date joined', aliases: ['datejoined', 'joined', 'joinedat', 'membershipdate', 'date'] },
+];
+
 export default function Members() {
   const { profile } = useAuth();
-  const { members, membersLoading, branches, departments, scope, branchName, deptName } = useData();
-  const toast = useToast();
-  const canWrite = can(profile?.role, 'members.write');
-  const myDepts = profile?.role === 'dept_leader' ? profile.departmentIds : [];
+  const { members, membersLoading, branches, deptTree, cells, scope, branchName, deptName, cellName } = useData();
+  const role = profile?.role;
+  const isDeptHead = role === 'dept_leader';
+  const myDepts = useMemo(() => (isDeptHead ? profile?.departmentIds ?? [] : []), [isDeptHead, profile?.departmentIds]);
+  const fullWrite = can(role, 'members.write');
+  const canAdd = can(role, 'members.add');
+  const canEdit = (m: Member) => fullWrite || (isDeptHead && m.departmentIds?.some((d) => myDepts.includes(d)));
 
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<'' | MemberCategory>('');
   const [status, setStatus] = useState<'' | MemberStatus>('');
   const [dept, setDept] = useState<string>(myDepts.length ? '__mine__' : '');
+  const [cellF, setCellF] = useState('');
   const [editing, setEditing] = useState<Member | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -44,14 +67,17 @@ export default function Members() {
       if (cat && m.category !== cat) return false;
       if (status && m.status !== status) return false;
       if (dept === '__mine__' && !m.departmentIds?.some((d) => myDepts.includes(d))) return false;
-      if (dept && dept !== '__mine__' && !m.departmentIds?.includes(dept)) return false;
+      if (dept === '__none__' && m.departmentIds?.length) return false;
+      if (dept && !dept.startsWith('__') && !m.departmentIds?.includes(dept)) return false;
+      if (cellF === '__none__' && m.cellId) return false;
+      if (cellF && cellF !== '__none__' && m.cellId !== cellF) return false;
       if (needle) {
-        const hay = `${m.firstName} ${m.lastName} ${m.phone} ${m.email}`.toLowerCase();
+        const hay = `${m.firstName} ${m.lastName} ${m.phone} ${m.email} ${m.membershipNo ?? ''}`.toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [members, q, cat, status, dept, myDepts]);
+  }, [members, q, cat, status, dept, cellF, myDepts]);
 
   const counts = useMemo(() => ({
     adult: members.filter((m) => m.category === 'adult').length,
@@ -60,76 +86,28 @@ export default function Members() {
     visitors: members.filter((m) => m.status === 'visitor').length,
   }), [members]);
 
-  function exportCsv() {
-    downloadCsv(`togg-members-${today()}.csv`, filtered.map((m) => ({
-      'First name': m.firstName, 'Last name': m.lastName, Phone: m.phone, Email: m.email, Gender: m.gender,
-      'Date of birth': m.dob, Category: m.category, Status: m.status, Branch: branchName(m.branchId),
-      Departments: (m.departmentIds || []).map(deptName).join('; '), Address: m.address, Occupation: m.occupation,
-      'Marital status': m.maritalStatus, Joined: m.joinedAt,
-    })));
-  }
-
-  async function importCsv(file: File) {
-    const targetBranch = scope !== ALL ? scope : '';
-    if (!targetBranch) { toast('err', 'Pick a branch in the sidebar first, then import.'); return; }
-    setImporting(true);
-    try {
-      const rows = await parseCsv(file);
-      const deptByName = new Map(departments.map((d) => [d.name.toLowerCase(), d.id]));
-      let added = 0;
-      for (let i = 0; i < rows.length; i += 400) {
-        const batch = writeBatch(db);
-        for (const r of rows.slice(i, i + 400)) {
-          const firstName = (r.firstname || r.name?.split(' ')[0] || '').trim();
-          const lastName = (r.lastname || r.surname || r.name?.split(' ').slice(1).join(' ') || '').trim();
-          if (!firstName) continue;
-          const category = (['adult', 'teen', 'child'].includes((r.category || '').toLowerCase()) ? r.category.toLowerCase() : 'adult') as MemberCategory;
-          const g = (r.gender || '').toLowerCase();
-          const departmentIds = (r.departments || r.department || '')
-            .split(/[;,]/).map((s) => deptByName.get(s.trim().toLowerCase())).filter((x): x is string => !!x);
-          batch.set(doc(collection(db, 'members')), {
-            ...emptyDraft(targetBranch),
-            firstName, lastName,
-            phone: (r.phone || r.phonenumber || '').trim(),
-            email: (r.email || '').trim(),
-            gender: g.startsWith('m') ? 'male' : g.startsWith('f') ? 'female' : '',
-            dob: (r.dateofbirth || r.dob || '').trim(),
-            category, departmentIds,
-            address: (r.address || '').trim(),
-            occupation: (r.occupation || '').trim(),
-            joinedAt: (r.joined || r.joinedat || today()).trim(),
-            createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-          });
-          added++;
-        }
-        await batch.commit();
-      }
-      toast('ok', `Imported ${added} members into ${branchName(targetBranch)}.`);
-    } catch (e) {
-      toast('err', errorText(e));
-    } finally {
-      setImporting(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
+  function exportXlsx() {
+    downloadExcel(`togg-members-${today()}.xlsx`, [{
+      name: 'Members',
+      rows: filtered.map((m) => ({
+        'Membership no.': m.membershipNo ?? '', 'First name': m.firstName, 'Last name': m.lastName, Phone: m.phone, Email: m.email,
+        Gender: m.gender, 'Date of birth': m.dob, 'Age group': m.category, Status: m.status, Branch: branchName(m.branchId),
+        Departments: (m.departmentIds || []).map(deptName).join('; '), Cell: m.cellId ? cellName(m.cellId) : '',
+        Address: m.address, Occupation: m.occupation, 'Marital status': m.maritalStatus, Joined: m.joinedAt,
+      })),
+    }]);
   }
 
   return (
     <div>
       <PageHeader
-        title="Members"
-        subtitle={`${scope === ALL ? 'All branches' : branchName(scope)} · adults, teens and children`}
+        title={isDeptHead ? 'Members' : 'Members'}
+        subtitle={isDeptHead ? `Register and look after members of ${myDepts.map(deptName).join(', ') || 'your department'}` : `${scope === ALL ? 'All branches' : branchName(scope)} · adults, teens and children`}
         actions={
           <>
-            <Button variant="outline" onClick={exportCsv}><Download className="h-4 w-4" /> Export</Button>
-            {canWrite && (
-              <>
-                <input ref={fileRef} type="file" accept=".csv" hidden onChange={(e) => e.target.files?.[0] && importCsv(e.target.files[0])} />
-                <Button variant="outline" loading={importing} onClick={() => fileRef.current?.click()} title="Columns: First name, Last name, Phone, Email, Gender, Date of birth, Category, Departments">
-                  <Upload className="h-4 w-4" /> Import CSV
-                </Button>
-                <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Add member</Button>
-              </>
-            )}
+            <Button variant="outline" onClick={exportXlsx}><Download className="h-4 w-4" /> Excel</Button>
+            {canAdd && <Button variant="outline" onClick={() => setImporting(true)}><Upload className="h-4 w-4" /> Import old file</Button>}
+            {canAdd && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Register member</Button>}
           </>
         }
       />
@@ -142,29 +120,35 @@ export default function Members() {
       </div>
 
       <Card>
-        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 lg:flex-row">
+        <div className="flex flex-col gap-3 border-b border-stone-100 p-4 xl:flex-row">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-            <Input className="pl-9" placeholder="Search name, phone or email…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input className="pl-9" placeholder="Search name, phone, email or membership no…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          <div className="grid grid-cols-3 gap-2 lg:flex">
-            <Select value={cat} onChange={(e) => setCat(e.target.value as MemberCategory | '')} className="lg:w-36">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:flex">
+            <Select value={cat} onChange={(e) => setCat(e.target.value as MemberCategory | '')} className="xl:w-32">
               <option value="">All ages</option><option value="adult">Adults</option><option value="teen">Teens</option><option value="child">Children</option>
             </Select>
-            <Select value={status} onChange={(e) => setStatus(e.target.value as MemberStatus | '')} className="lg:w-36">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as MemberStatus | '')} className="xl:w-32">
               <option value="">All status</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="visitor">Visitor</option>
             </Select>
-            <Select value={dept} onChange={(e) => setDept(e.target.value)} className="lg:w-44">
+            <Select value={dept} onChange={(e) => setDept(e.target.value)} className="xl:w-48">
               <option value="">All departments</option>
               {myDepts.length > 0 && <option value="__mine__">My departments</option>}
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              <option value="__none__">Not in a department</option>
+              {deptTree.map(({ dept: d, depth }) => <option key={d.id} value={d.id}>{'  '.repeat(depth * 2)}{depth ? '↳ ' : ''}{d.name}</option>)}
+            </Select>
+            <Select value={cellF} onChange={(e) => setCellF(e.target.value)} className="xl:w-40">
+              <option value="">All cells</option>
+              <option value="__none__">Not in a cell</option>
+              {cells.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </div>
         </div>
 
         {membersLoading ? <Spinner /> : filtered.length === 0 ? (
           <Empty icon={<Users />} title={members.length ? 'No one matches those filters' : 'No members yet'}>
-            {members.length === 0 && canWrite && 'Add members one by one, import a CSV, or share the /join link so people register themselves.'}
+            {members.length === 0 && canAdd && 'Register members one by one, import your old Excel file, or share the /join link so people register themselves.'}
           </Empty>
         ) : (
           <>
@@ -175,10 +159,10 @@ export default function Members() {
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Phone</th>
                     {scope === ALL && <th className="px-4 py-3 font-medium">Branch</th>}
-                    <th className="px-4 py-3 font-medium">Departments</th>
+                    <th className="px-4 py-3 font-medium">Departments / cell</th>
                     <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Joined</th>
-                    {canWrite && <th className="px-4 py-3" />}
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody>
@@ -189,22 +173,26 @@ export default function Members() {
                           <Avatar text={initials(m.firstName, m.lastName)} />
                           <div>
                             <div className="font-medium text-stone-900">{m.firstName} {m.lastName}</div>
-                            <div className="text-xs text-stone-500">{CATEGORY_LABEL[m.category]}{ageFrom(m.dob) !== null && ` · ${ageFrom(m.dob)} yrs`}</div>
+                            <div className="text-xs text-stone-500">
+                              {m.membershipNo && <span className="mr-1 font-mono text-royal-600">{m.membershipNo}</span>}
+                              {CATEGORY_LABEL[m.category]}{ageFrom(m.dob) !== null && ` · ${ageFrom(m.dob)} yrs`}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-stone-600">{m.phone || '—'}</td>
                       {scope === ALL && <td className="px-4 py-3 text-stone-600">{branchName(m.branchId)}</td>}
                       <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">{(m.departmentIds || []).map((d) => <Badge key={d} color="royal">{deptName(d)}</Badge>)}</div>
+                        <div className="flex flex-wrap gap-1">
+                          {(m.departmentIds || []).map((d) => <Badge key={d} color="royal">{deptName(d)}</Badge>)}
+                          {m.cellId && <Badge color="blue">Cell: {cellName(m.cellId)}</Badge>}
+                        </div>
                       </td>
                       <td className="px-4 py-3"><Badge color={STATUS_COLOR[m.status]}>{m.status}</Badge></td>
                       <td className="px-4 py-3 text-stone-600">{prettyDate(m.joinedAt)}</td>
-                      {canWrite && (
-                        <td className="px-4 py-3 text-right">
-                          <button onClick={() => setEditing(m)} className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-royal-700" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
-                        </td>
-                      )}
+                      <td className="px-4 py-3 text-right">
+                        {canEdit(m) && <button onClick={() => setEditing(m)} className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-royal-700" aria-label="Edit"><Pencil className="h-4 w-4" /></button>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -212,11 +200,11 @@ export default function Members() {
             </div>
             <ul className="divide-y divide-stone-100 md:hidden">
               {filtered.map((m) => (
-                <li key={m.id} className="flex items-center gap-3 p-4" onClick={() => canWrite && setEditing(m)}>
+                <li key={m.id} className="flex items-center gap-3 p-4" onClick={() => canEdit(m) && setEditing(m)}>
                   <Avatar text={initials(m.firstName, m.lastName)} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium text-stone-900">{m.firstName} {m.lastName}</div>
-                    <div className="truncate text-xs text-stone-500">{m.phone || 'No phone'}{scope === ALL && ` · ${branchName(m.branchId)}`}</div>
+                    <div className="truncate text-xs text-stone-500">{m.membershipNo ? `${m.membershipNo} · ` : ''}{m.phone || 'No phone'}{scope === ALL && ` · ${branchName(m.branchId)}`}</div>
                   </div>
                   <Badge color={STATUS_COLOR[m.status]}>{m.status}</Badge>
                 </li>
@@ -230,35 +218,65 @@ export default function Members() {
       {(creating || editing) && (
         <MemberForm
           member={editing}
-          defaultBranch={scope !== ALL ? scope : profile?.branchId ?? branches[0]?.id ?? ''}
+          defaultBranch={profile?.branchId ?? (scope !== ALL ? scope : branches[0]?.id ?? '')}
           lockBranch={!!profile?.branchId}
           onClose={() => { setCreating(false); setEditing(null); }}
         />
       )}
+      {importing && <MemberImport onClose={() => setImporting(false)} />}
     </div>
   );
 }
 
-function MemberForm({ member, defaultBranch, lockBranch, onClose }: { member: Member | null; defaultBranch: string; lockBranch: boolean; onClose: () => void }) {
-  const { branches, departments } = useData();
+function DeptChips({ value, onChange, allowed }: { value: string[]; onChange: (v: string[]) => void; allowed?: string[] }) {
+  const { deptTree } = useData();
+  const list = deptTree.filter(({ dept }) => !allowed || allowed.includes(dept.id));
+  if (list.length === 0) return <p className="text-sm text-stone-500">No departments set up yet.</p>;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {list.map(({ dept, depth }) => {
+        const on = value.includes(dept.id);
+        return (
+          <button type="button" key={dept.id} onClick={() => onChange(on ? value.filter((x) => x !== dept.id) : [...value, dept.id])}
+            className={`rounded-full border px-3 py-1.5 text-sm transition ${on ? 'border-royal-600 bg-royal-600 text-white' : 'border-stone-300 bg-white text-stone-600 hover:border-royal-300'} ${depth ? 'text-xs' : 'font-medium'}`}>
+            {depth > 0 && '↳ '}{dept.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetDept, presetCell }: { member: Member | null; defaultBranch: string; lockBranch: boolean; onClose: () => void; presetDept?: string; presetCell?: string }) {
+  const { profile } = useAuth();
+  const { branches, cells } = useData();
   const toast = useToast();
+  const isDeptHead = profile?.role === 'dept_leader';
+  const fullWrite = can(profile?.role, 'members.write');
   const [d, setD] = useState<Draft>(() => {
-    if (!member) return emptyDraft(defaultBranch);
+    if (!member) return { ...emptyMember(defaultBranch), cellId: presetCell ?? null, departmentIds: presetDept ? [presetDept] : isDeptHead && profile?.departmentIds?.length === 1 ? [...profile.departmentIds] : [] };
     const { id: _id, ...rest } = member;
-    return { ...emptyDraft(member.branchId), ...rest };
+    return { ...emptyMember(member.branchId), ...rest };
   });
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
+  const branchCells = cells.filter((c) => c.branchId === d.branchId);
 
   async function save(e: FormEvent) {
     e.preventDefault();
     if (!d.branchId) { toast('err', 'Choose a branch.'); return; }
+    if (isDeptHead && !d.departmentIds.some((x) => profile?.departmentIds.includes(x))) {
+      toast('err', 'Choose at least one of your departments.'); return;
+    }
     setBusy(true);
     try {
-      const data = { ...d, firstName: d.firstName.trim(), lastName: d.lastName.trim(), updatedAt: serverTimestamp() };
+      const data = { ...d, firstName: d.firstName.trim(), lastName: d.lastName.trim(), cellId: d.cellId || null, updatedAt: serverTimestamp() };
       if (member) await updateDoc(doc(db, 'members', member.id), data);
-      else await addDoc(collection(db, 'members'), { ...data, createdAt: serverTimestamp() });
-      toast('ok', member ? 'Member updated.' : 'Member added.');
+      else {
+        const membershipNo = d.membershipNo?.trim() || (await reserveMembershipNos(1))[0];
+        await addDoc(collection(db, 'members'), { ...data, membershipNo, createdAt: serverTimestamp() });
+      }
+      toast('ok', member ? 'Member updated.' : 'Member registered.');
       onClose();
     } catch (err) {
       toast('err', errorText(err));
@@ -280,12 +298,8 @@ function MemberForm({ member, defaultBranch, lockBranch, onClose }: { member: Me
     }
   }
 
-  function toggleDept(id: string) {
-    set('departmentIds', d.departmentIds.includes(id) ? d.departmentIds.filter((x) => x !== id) : [...d.departmentIds, id]);
-  }
-
   return (
-    <Modal open onClose={onClose} title={member ? 'Edit member' : 'Add member'} wide>
+    <Modal open onClose={onClose} title={member ? 'Edit member' : 'Register member'} wide>
       <form onSubmit={save} className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="First name"><Input required value={d.firstName} onChange={(e) => set('firstName', e.target.value)} /></Field>
@@ -314,6 +328,15 @@ function MemberForm({ member, defaultBranch, lockBranch, onClose }: { member: Me
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>
           </Field>
+          <Field label="Membership / tithe card no." hint={member ? undefined : 'Leave empty to assign the next number automatically.'}>
+            <Input value={d.membershipNo ?? ''} onChange={(e) => set('membershipNo', e.target.value)} placeholder="TOGG-0001" />
+          </Field>
+          <Field label="Cell">
+            <Select value={d.cellId ?? ''} onChange={(e) => set('cellId', e.target.value || null)}>
+              <option value="">Not in a cell</option>
+              {branchCells.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+          </Field>
           <Field label="Date joined"><Input type="date" value={d.joinedAt} onChange={(e) => set('joinedAt', e.target.value)} /></Field>
           <Field label="Marital status">
             <Select value={d.maritalStatus} onChange={(e) => set('maritalStatus', e.target.value)}>
@@ -325,32 +348,107 @@ function MemberForm({ member, defaultBranch, lockBranch, onClose }: { member: Me
         </div>
 
         <div>
-          <span className="mb-2 block text-sm font-medium text-stone-700">Departments</span>
-          {departments.length === 0 ? <p className="text-sm text-stone-500">No departments set up yet.</p> : (
-            <div className="flex flex-wrap gap-2">
-              {departments.map((dep) => {
-                const on = d.departmentIds.includes(dep.id);
-                return (
-                  <button type="button" key={dep.id} onClick={() => toggleDept(dep.id)}
-                    className={`rounded-full border px-3 py-1.5 text-sm transition ${on ? 'border-royal-600 bg-royal-600 text-white' : 'border-stone-300 bg-white text-stone-600 hover:border-royal-300'}`}>
-                    {dep.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <span className="mb-2 block text-sm font-medium text-stone-700">Departments{isDeptHead && ' (yours)'}</span>
+          <DeptChips value={d.departmentIds} onChange={(v) => set('departmentIds', v)} allowed={isDeptHead ? profile?.departmentIds : undefined} />
         </div>
 
         <Field label="Notes"><Textarea value={d.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
 
         <div className="flex items-center justify-between border-t border-stone-100 pt-4">
-          {member ? <Button type="button" variant="ghost" className="text-red-600" onClick={remove} disabled={busy}><Trash2 className="h-4 w-4" /> Delete</Button> : <span />}
+          {member && fullWrite ? <Button type="button" variant="ghost" className="text-red-600" onClick={remove} disabled={busy}><Trash2 className="h-4 w-4" /> Delete</Button> : <span />}
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" loading={busy}>{member ? 'Save changes' : 'Add member'}</Button>
+            <Button type="submit" loading={busy}>{member ? 'Save changes' : 'Register member'}</Button>
           </div>
         </div>
       </form>
     </Modal>
+  );
+}
+
+function MemberImport({ onClose }: { onClose: () => void }) {
+  const { profile } = useAuth();
+  const { branches, members, departments, deptTree, scope } = useData();
+  const isDeptHead = profile?.role === 'dept_leader';
+  const [branchId, setBranchId] = useState(profile?.branchId ?? (scope !== ALL ? scope : ''));
+  const [forceDept, setForceDept] = useState(isDeptHead && profile?.departmentIds.length ? profile.departmentIds[0] : '');
+  const [skipDupes, setSkipDupes] = useState(true);
+
+  async function run(rows: Record<string, string>[]) {
+    if (!branchId) throw new Error('Choose the branch these members belong to.');
+    const deptByName = new Map(departments.map((d) => [d.name.toLowerCase().replace(/[^a-z0-9]/g, ''), d.id]));
+    const havePhones = new Set(members.filter((m) => m.branchId === branchId && m.phone).map((m) => normalizePhone(m.phone)));
+    const haveNames = new Set(members.filter((m) => m.branchId === branchId).map((m) => `${m.firstName} ${m.lastName}`.toLowerCase().trim()));
+    const notes: string[] = [];
+    const ready: Draft[] = [];
+    let skipped = 0;
+    rows.forEach((r, i) => {
+      let first = r.firstName; let last = r.lastName;
+      if (!first && r.name) {
+        const parts = r.name.split(/\s+/).filter(Boolean);
+        first = parts[0] ?? ''; last = parts.slice(1).join(' ');
+      }
+      if (!first) { skipped++; notes.push(`Row ${i + 2}: no name`); return; }
+      const phone = r.phone ? normalizePhone(r.phone) : '';
+      const key = `${first} ${last}`.toLowerCase().trim();
+      if (skipDupes && ((phone && havePhones.has(phone)) || haveNames.has(key))) { skipped++; notes.push(`Row ${i + 2}: ${first} ${last} already exists`); return; }
+      if (phone) havePhones.add(phone);
+      haveNames.add(key);
+      const g = (r.gender || '').toLowerCase();
+      const c = (r.category || '').toLowerCase();
+      const dob = parseDateLoose(r.dob);
+      const age = dob ? new Date().getFullYear() - Number(dob.slice(0, 4)) : null;
+      const category: MemberCategory = c.startsWith('child') || c.startsWith('kid') ? 'child' : c.startsWith('teen') || c.startsWith('youth') ? 'teen'
+        : c ? 'adult' : age !== null && age < 13 ? 'child' : age !== null && age < 18 ? 'teen' : 'adult';
+      let departmentIds = (r.departments || '').split(/[;,/]/).map((s) => deptByName.get(s.toLowerCase().replace(/[^a-z0-9]/g, ''))).filter((x): x is string => !!x);
+      if (forceDept && !departmentIds.includes(forceDept)) departmentIds = [...departmentIds, forceDept];
+      ready.push({
+        ...emptyMember(branchId), firstName: first, lastName: last, phone, email: r.email, gender: g.startsWith('m') ? 'male' : g.startsWith('f') ? 'female' : '',
+        dob, category, departmentIds, address: r.address, occupation: r.occupation, maritalStatus: r.maritalStatus,
+        joinedAt: parseDateLoose(r.joinedAt) || today(), membershipNo: r.membershipNo, source: 'import',
+      });
+    });
+    const needNos = ready.filter((m) => !m.membershipNo).length;
+    const nos = await reserveMembershipNos(needNos);
+    let n = 0;
+    ready.forEach((m) => { if (!m.membershipNo) m.membershipNo = nos[n++]; });
+    for (let i = 0; i < ready.length; i += 400) {
+      const batch = writeBatch(db);
+      ready.slice(i, i + 400).forEach((m) => batch.set(doc(collection(db, 'members')), { ...m, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+      await batch.commit();
+    }
+    return { added: ready.length, skipped, notes };
+  }
+
+  return (
+    <ImportWizard
+      title="Import members from an old file"
+      fields={MEMBER_FIELDS}
+      onClose={onClose}
+      onImport={run}
+      help={<>Works with old Excel registers and CSV exports. Use <b>Full name</b> <i>or</i> First + Last name. Dates like <code>05/03/1990</code> are read day-first. Members without a membership number get the next TOGG number.</>}
+      options={
+        <div className="grid gap-3 rounded-xl border border-stone-200 p-4 sm:grid-cols-2">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-stone-700">Branch</span>
+            <Select required value={branchId} disabled={!!profile?.branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="">Choose…</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-stone-700">Also put everyone in department</span>
+            <Select value={forceDept} onChange={(e) => setForceDept(e.target.value)} required={isDeptHead}>
+              {!isDeptHead && <option value="">— no —</option>}
+              {deptTree.filter(({ dept }) => !isDeptHead || profile?.departmentIds.includes(dept.id)).map(({ dept, depth }) => <option key={dept.id} value={dept.id}>{depth ? '↳ ' : ''}{dept.name}</option>)}
+            </Select>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-stone-700 sm:col-span-2">
+            <input type="checkbox" checked={skipDupes} onChange={(e) => setSkipDupes(e.target.checked)} className="rounded border-stone-300" />
+            Skip people already registered (same phone number or same name)
+          </label>
+        </div>
+      }
+    />
   );
 }
