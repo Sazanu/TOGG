@@ -26,7 +26,7 @@ export default function Dashboard() {
   // Department heads see their own departments' people.
   const members = role === 'dept_leader' ? allMembers.filter((m) => m.departmentIds?.some((d) => profile?.departmentIds.includes(d))) : allMembers;
   const TITLES = /^(rev|revd|pastor|ps|apostle|bishop|prophet|evangelist|elder|deacon|deaconess|dr|mr|mrs|ms|miss|bro|sis|brother|sister)\.?$/i;
-  const first = (profile?.displayName ?? '').split(/\s+/).find((w) => w && !TITLES.test(w)) ?? '';
+  const first = (profile?.displayName ?? '').split(/\s+/).find((w) => w && !TITLES.test(w)) ?? profile?.displayName ?? '';
 
   const now = new Date();
   const { start, end } = monthRange(now.getFullYear(), now.getMonth());

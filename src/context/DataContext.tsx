@@ -3,9 +3,40 @@ import { collection, onSnapshot, orderBy, query, where, type Query } from 'fireb
 import { db } from '../lib/firebase';
 import type { Branch, Cell, Department, Member } from '../lib/types';
 import { can, isGlobal } from '../lib/roles';
+import { isoDate } from '../lib/format';
 import { useAuth } from './AuthContext';
 
 export const ALL = 'all';
+
+/** Accepts both TOGG members and records saved by the old 2025 attendance form. */
+function normalizeMember(id: string, d: Record<string, unknown>): Member {
+  const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+  const dateStr = (v: unknown) => {
+    if (v && typeof v === 'object' && 'toDate' in v) return isoDate((v as { toDate(): Date }).toDate());
+    const t = typeof v === 'string' ? Date.parse(v) : NaN;
+    return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : Number.isNaN(t) ? '' : isoDate(new Date(t));
+  };
+  let firstName = str(d.firstName);
+  let lastName = str(d.lastName);
+  if (!firstName && d.name) {
+    const parts = str(d.name).trim().split(/\s+/);
+    firstName = parts[0] ?? ''; lastName = parts.slice(1).join(' ');
+  }
+  const status = ['active', 'inactive', 'visitor'].includes(str(d.status)) ? str(d.status) : 'active';
+  const category = ['adult', 'teen', 'child'].includes(str(d.category)) ? str(d.category) : 'adult';
+  return {
+    ...(d as object),
+    id,
+    firstName: firstName || '(no name)',
+    lastName,
+    phone: str(d.phone), email: str(d.email), gender: (str(d.gender) as Member['gender']) || '',
+    dob: dateStr(d.dob), category: category as Member['category'], status: status as Member['status'],
+    branchId: str(d.branchId), departmentIds: Array.isArray(d.departmentIds) ? (d.departmentIds as string[]) : [],
+    address: str(d.address ?? d.location), occupation: str(d.occupation), maritalStatus: str(d.maritalStatus),
+    joinedAt: dateStr(d.joinedAt ?? d.dateAdded), notes: str(d.notes),
+    membershipNo: str(d.membershipNo), cellId: (d.cellId as string | null) ?? null, source: str(d.source) || (d.name && !d.firstName ? 'old-form' : ''),
+  };
+}
 
 interface DataState {
   branches: Branch[];
@@ -94,7 +125,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return onSnapshot(
       q,
       (s) => {
-        const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Member);
+        const list = s.docs.map((d) => normalizeMember(d.id, d.data()));
         list.sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
         setMembers(list);
         setMembersLoading(false);

@@ -8,19 +8,18 @@ export default {
         display: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
       },
       colors: {
-        // Royal purple — the "throne"
+        // Church blue — from the globe in the TOGG Ministries logo (#3FBCE8)
         royal: {
-          50: '#f5f3fb', 100: '#ebe6f7', 200: '#d5cbee', 300: '#b5a3e0',
-          400: '#9275cf', 500: '#7653bd', 600: '#5f3fa0', 700: '#4d3283',
-          800: '#3c2766', 900: '#2b1c4a', 950: '#1b1030',
+          50: '#effafe', 100: '#dcf2fc', 200: '#b6e4f8', 300: '#7dd0f1', 400: '#3fbce8',
+          500: '#1a9fd2', 600: '#0f80b0', 700: '#0e668e', 800: '#0f5274', 900: '#0f4361',
+          950: '#0a2b40',
         },
-        // Gold — the "grace"
+        // Gold — from the throne in the logo (#C69A3D)
         gold: {
-          50: '#fdf9ec', 100: '#f9efcc', 200: '#f2dd95', 300: '#e9c65c',
-          400: '#dfb037', 500: '#c99524', 600: '#a8741c', 700: '#86561b',
-          800: '#6f461d', 900: '#5e3b1d',
+          50: '#fcf8ee', 100: '#f7edd2', 200: '#efd9a3', 300: '#e4c06c', 400: '#d6a948',
+          500: '#c69a3d', 600: '#a87c2c', 700: '#875f25', 800: '#6f4d24', 900: '#5d4122',
         },
-        cream: '#faf7f2',
+        cream: '#f7fafc',
       },
       boxShadow: {
         card: '0 1px 2px rgba(27,16,48,0.04), 0 4px 16px rgba(27,16,48,0.05)',

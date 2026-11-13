@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Crest, Logo } from '../components/Logo';
+import { FullLogo, Logo } from '../components/Logo';
 import { Button, Field, Input, errorText } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
@@ -36,16 +36,16 @@ export default function Login() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="relative hidden overflow-hidden bg-royal-950 lg:block">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(223,176,55,0.18),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(63,188,232,0.22),transparent_55%),radial-gradient(circle_at_80%_90%,rgba(198,154,61,0.18),transparent_50%)]" />
         <div className="relative flex h-full flex-col justify-between p-12">
           <Logo light />
           <div>
-            <Crest className="mb-8 h-16 w-16" />
+            <div className="mb-8 inline-block rounded-3xl bg-white p-4 shadow-xl"><FullLogo className="h-36" /></div>
             <h1 className="font-display text-4xl font-extrabold leading-tight text-white">
-              One church.<br />Every branch.<br /><span className="text-gold-400">One place.</span>
+              One church.<br />Every branch.<br /><span className="text-gold-300">One place.</span>
             </h1>
             <p className="mt-4 max-w-md text-royal-200">
-              Members, attendance and giving for every branch of Throne of God's Grace, with the right access for every pastor and department.
+              Members, tithes, cells, departments and SMS for every branch of Throne of God's Grace Ministries.
             </p>
           </div>
           <p className="text-xs text-royal-400">“Let us therefore come boldly unto the throne of grace.” — Hebrews 4:16</p>

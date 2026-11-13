@@ -1,6 +1,8 @@
 # TOGG — Church Management System
 
-The church management system for **Throne of God's Grace**: one church, many branches, with the Head Pastor and Associate Pastor as the main admins.
+<img src="public/logo-full.png" alt="Throne of God's Grace Ministries" height="140" />
+
+The church management system for **Throne of God's Grace Ministries**: one church, many branches, with the Head Pastor and Associate Pastor as the main admins.
 
 | Area | What it does |
 |---|---|
@@ -29,7 +31,7 @@ The church management system for **Throne of God's Grace**: one church, many bra
 | Department Head | Own | Registers and edits members of **their** departments (sub-departments included); runs their cells; submits the monthly report, budget and plan |
 | Cell Leader | Own | Meeting reports for their cells; adds new contacts as visitors |
 
-These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **105 automated tests** check them (`npm run test:rules`).
+These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **110 automated tests** check them (`npm run test:rules`).
 
 ---
 
@@ -40,7 +42,7 @@ The app is already connected to the **`attendanceform-cdb69`** Firebase project 
 1. In the [Firebase console](https://console.firebase.google.com/project/attendanceform-cdb69):
    - **Build → Authentication → Get started → Email/Password → Enable.**
    - **Build → Firestore Database → Create database → Production mode.** Choose `eur3 (europe)` or `europe-west1`, the closest to Ghana.
-   - The old attendance form uses the *Realtime Database*. TOGG uses *Firestore*, a separate database, so the old form is not affected.
+   - Your project already holds data from the **old 2025 attendance form** (a few `members` and the `attendance` records). TOGG shows those old members under **All branches**, so you can open each one and assign a branch. The old `attendance` records stay readable by the Head and Associate Pastor. **Once you deploy TOGG's rules, the old form can no longer save**, so stop using it.
 2. On your computer (needs [Node.js 20+](https://nodejs.org)):
    ```bash
    npm install
@@ -48,7 +50,17 @@ The app is already connected to the **`attendanceform-cdb69`** Firebase project 
    npx firebase login
    npx firebase deploy --only firestore        # security rules + indexes
    ```
+   > ⚠️ **Do this step first and soon.** Until the rules are deployed, the database is open to anyone on the internet.
 3. Run it: `npm run dev`, then open http://localhost:5173. **The first account created becomes the Head Pastor (Super Admin).**
+
+   **Stuck on "Account not set up" or "contact the pastor"?** This happens when you signed up before the database was ready.
+   - **Usual fix:** sign in again. While no Head Pastor exists yet, you'll see **"Set me up as Head Pastor (Super Admin)"**. Press it.
+   - **If someone else already took that role:** run the emergency tool with a service-account key from *Project settings → Service accounts → Generate new private key*:
+     ```bash
+     npm --prefix functions install
+     node functions/scripts/make-super-admin.js path/to/key.json your@email.com
+     ```
+     Delete the key file afterwards.
 4. Put it online on Firebase Hosting: `npm run deploy:web`. It will be at `https://attendanceform-cdb69.web.app`.
    You can connect your own domain later under *Hosting → Add custom domain*.
 
@@ -80,7 +92,7 @@ Until a provider is chosen, the system is in **Test mode**: messages are recorde
 npm run emulators   # local Auth + Firestore + Functions (needs Java)
 # .env.local:  VITE_USE_EMULATORS=true  VITE_FIREBASE_PROJECT_ID=demo-togg
 npm run dev
-npm run test:rules  # 105 security-rule tests
+npm run test:rules  # 110 security-rule tests
 npm run test:sms    # 17 SMS engine tests (audiences, reminders, absentees, birthdays…)
 npm run typecheck
 ```

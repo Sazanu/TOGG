@@ -89,6 +89,15 @@ service cloud.firestore {
       allow update: if signedIn() && request.auth.uid == uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'phone']);
 
+      // Recovery: someone who signed up before the database was ready (so their profile is
+      // "pending") may still become the first Head Pastor — but only while nobody else has.
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.role == 'head_pastor' && request.resource.data.active == true
+        && request.resource.data.branchId == null
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'phone', 'role', 'branchId', 'departmentIds', 'active', 'createdAt'])
+        && !exists(/databases/$(database)/documents/meta/setup)
+        && existsAfter(/databases/$(database)/documents/meta/setup);
+
       allow update: if isGlobal() && request.auth.uid != uid
         && validAccess(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active'])
@@ -296,6 +305,13 @@ service cloud.firestore {
       allow update: if canSignups(resource.data.branchId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'processedAt']);
       allow create, update: if isGlobal() && request.resource.data.status in ['new', 'done'];
+    }
+
+    // ---------- data from the old 2025 attendance form ----------
+    // Kept readable for the Head / Associate Pastor so nothing is lost. The old form itself
+    // can no longer write once these rules are deployed.
+    match /attendance/{id} {
+      allow read: if isGlobal();
     }
 
     match /{document=**} {

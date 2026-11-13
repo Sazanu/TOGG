@@ -212,6 +212,30 @@ await t('membership counter can only go up', async () => {
   await assertFails(updateDoc(doc(db('ushA'), 'meta/counters'), { memberSeq: 7 }));
 });
 
+console.log('First-admin recovery & old data');
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const d = ctx.firestore();
+  await deleteDoc(doc(d, 'meta/setup'));               // as if the first sign-up never finished
+  await setDoc(doc(d, 'users/late'), { ...base, role: 'pending', active: false });
+  await setDoc(doc(d, 'users/later'), { ...base, role: 'pending', active: false });
+  await setDoc(doc(d, 'attendance/old1'), { name: 'Solomon', date: '2025-02-16' });
+});
+const claim = (uid) => {
+  const d = db(uid); const b = writeBatch(d);
+  b.set(doc(d, `users/${uid}`), { ...base, role: 'head_pastor', active: true });
+  b.set(doc(d, 'meta/setup'), { by: uid, at: serverTimestamp() });
+  return b.commit();
+};
+await t('pending user cannot self-promote without finishing setup', () => assertFails(setDoc(doc(db('late'), 'users/late'), { ...base, role: 'head_pastor', active: true })));
+await t('pending user finishes setup as Head Pastor while setup is open', () => assertSucceeds(claim('late')));
+await t('nobody else can claim it afterwards', () => assertFails(claim('later')));
+await t('old attendance data: readable by Super Admin', () => assertSucceeds(getDoc(doc(db('head'), 'attendance/old1'))));
+await t('old attendance data: hidden from others and the public', async () => {
+  await assertFails(getDoc(doc(db('bpA'), 'attendance/old1')));
+  await assertFails(getDoc(doc(anon(), 'attendance/old1')));
+  await assertFails(setDoc(doc(anon(), 'attendance/x'), { name: 'spam' }));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup();
 process.exit(fail ? 1 : 0);

@@ -19,7 +19,7 @@ export interface Recipient { phone: string; firstName: string; name: string }
 export const DEFAULT_SETTINGS = {
   provider: 'log',
   senderId: 'TOGG',
-  churchName: "Throne of God's Grace",
+  churchName: "Throne of God's Grace Ministries",
   absenteeEnabled: false,
   absenteeTemplate: "Hello {firstName}, we missed you at church today. We love you and are praying for you. God bless you! - {church}",
   absenteeServiceTypes: ['Sunday Service'],

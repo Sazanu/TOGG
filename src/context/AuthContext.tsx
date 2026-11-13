@@ -8,7 +8,7 @@ import {
   updateProfile,
   type User,
 } from 'firebase/auth';
-import { doc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { AppUser } from '../lib/types';
 
@@ -19,6 +19,10 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string, phone: string) => Promise<{ firstAdmin: boolean }>;
   signOut: () => Promise<void>;
+  /** True if nobody has become Head Pastor yet (first-time setup still open). */
+  setupOpen: () => Promise<boolean>;
+  /** Makes the signed-in person the Head Pastor (Super Admin), only while setup is still open. */
+  claimFirstAdmin: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
 }
 
@@ -59,31 +63,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * (guarded by the meta/setup document + security rules). Everyone after that
    * starts as "pending" until the Head or Associate Pastor gives them a role.
    */
-  async function signUp(name: string, email: string, password: string, phone: string) {
-    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    await updateProfile(cred.user, { displayName: name });
-    const uid = cred.user.uid;
+  /** Writes the profile; the first person ever becomes Head Pastor. Returns whether they did. */
+  async function createProfile(u: User, name: string, phone: string, onlyIfFirst: boolean) {
     let firstAdmin = false;
     await runTransaction(db, async (tx) => {
       const setupRef = doc(db, 'meta', 'setup');
       const setup = await tx.get(setupRef);
       firstAdmin = !setup.exists();
+      if (!firstAdmin && onlyIfFirst) throw new Error('Setup is already complete. Ask the Head Pastor to give you access.');
       const base = {
-        email: email.trim().toLowerCase(),
-        displayName: name,
+        email: (u.email ?? '').trim().toLowerCase(),
+        displayName: name || u.displayName || (u.email ?? '').split('@')[0],
         phone,
         branchId: null,
         departmentIds: [],
         createdAt: serverTimestamp(),
       };
       if (firstAdmin) {
-        tx.set(doc(db, 'users', uid), { ...base, role: 'head_pastor', active: true });
-        tx.set(setupRef, { by: uid, at: serverTimestamp() });
+        tx.set(doc(db, 'users', u.uid), { ...base, role: 'head_pastor', active: true });
+        tx.set(setupRef, { by: u.uid, at: serverTimestamp() });
       } else {
-        tx.set(doc(db, 'users', uid), { ...base, role: 'pending', active: false });
+        tx.set(doc(db, 'users', u.uid), { ...base, role: 'pending', active: false });
       }
     });
+    return firstAdmin;
+  }
+
+  async function signUp(name: string, email: string, password: string, phone: string) {
+    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+    await updateProfile(cred.user, { displayName: name });
+    // If this step fails (e.g. the database was not ready), the person can finish it
+    // later from the "Finish setup" screen — the login itself is kept.
+    const firstAdmin = await createProfile(cred.user, name, phone, false);
     return { firstAdmin };
+  }
+
+  async function setupOpen() {
+    const s = await getDoc(doc(db, 'meta', 'setup'));
+    return !s.exists();
+  }
+
+  async function claimFirstAdmin() {
+    if (!auth.currentUser) throw new Error('Sign in first.');
+    await createProfile(auth.currentUser, profile?.displayName ?? auth.currentUser.displayName ?? '', profile?.phone ?? '', true);
   }
 
   async function signOut() {
@@ -95,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword, setupOpen, claimFirstAdmin }}>
       {children}
     </AuthContext.Provider>
   );

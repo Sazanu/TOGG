@@ -119,7 +119,7 @@ export default function Registrations() {
       {qr && (
         <Modal open onClose={() => setQr(null)} title={qr.title}>
           <div className="flex flex-col items-center text-center">
-            <div className="rounded-2xl border border-stone-200 bg-white p-4"><QRCodeSVG value={qr.url} size={240} fgColor="#1b1030" /></div>
+            <div className="rounded-2xl border border-stone-200 bg-white p-4"><QRCodeSVG value={qr.url} size={240} fgColor="#0a2b40" /></div>
             <p className="mt-4 font-display text-lg font-bold text-royal-950">Scan to {qr.title.toLowerCase().includes('visitor') ? 'say hello' : 'register'}</p>
             <p className="mt-1 break-all text-xs text-stone-500">{qr.url}</p>
             <Button variant="outline" className="mt-4" onClick={() => window.print()}>Print</Button>

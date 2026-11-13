@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection, getDocs, orderBy, query, serverTimestamp } from 'firebase/firestore';
 import { CheckCircle2 } from 'lucide-react';
-import { Crest } from '../components/Logo';
+import { FullLogo } from '../components/Logo';
 import { Button, Card, Field, Input, Select, Textarea, errorText } from '../components/ui';
 import { db } from '../lib/firebase';
 import type { Branch, MemberCategory } from '../lib/types';
@@ -56,11 +56,10 @@ export default function PublicForm({ kind }: { kind: 'member' | 'visitor' }) {
   const set = (k: keyof typeof d, v: string) => setD((p) => ({ ...p, [k]: v }));
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-royal-950 via-royal-900 to-cream to-[22rem] px-4 py-10">
+    <div className="min-h-screen bg-gradient-to-b from-royal-950 via-royal-900 via-[16rem] to-cream to-[30rem] px-4 py-10">
       <div className="mx-auto max-w-lg">
         <div className="mb-6 text-center text-white">
-          <Crest className="mx-auto mb-3 h-14 w-14" />
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold-300">Throne of God's Grace</p>
+          <div className="mx-auto mb-4 inline-block rounded-3xl bg-white p-3 shadow-xl"><FullLogo className="h-28" /></div>
           <h1 className="mt-2 font-display text-3xl font-extrabold">{kind === 'member' ? 'Member registration' : 'Welcome, friend!'}</h1>
           <p className="mt-2 text-sm text-royal-200">
             {kind === 'member' ? 'Fill in your details to join the church family.' : "We're so glad you worshipped with us today. Tell us a little about you."}
