@@ -1,0 +1,6 @@
+# static-web-server settings used on Wasmer Edge
+[general]
+root = "/public"
+# TOGG is a single-page app: links like /join, /visit, /prayer and /give/... must load index.html
+# (otherwise phones that scan a QR code get "404 Not Found").
+page-fallback = "/public/index.html"
