@@ -42,6 +42,18 @@ The system is then at **https://attendanceform-cdb69.web.app**. The QR codes, th
 project pages and welfare SMS links all point there. (To use your own domain: Firebase console →
 Hosting → *Add custom domain*, then enter it in the app under *Payments & links*.)
 
+### Other hosts (instead of Firebase Hosting)
+The website is only the `dist` folder, so any static host works. The routing files are already included (`public/_redirects`, `netlify.toml`, `vercel.json`).
+
+| Host | Free plan | How |
+|---|---|---|
+| **Firebase Hosting** (recommended) | 10 GB storage, 360 MB/day transfer | `npm run deploy:web` (same project as the database) |
+| **Cloudflare Pages** | Unlimited bandwidth | Create a Pages project, connect GitHub (build `npm run build`, output `dist`), or drag-and-drop the `dist` folder |
+| **Vercel** | 100 GB/month | Import the GitHub repository. Settings are read from `vercel.json` |
+| **Netlify** | 100 GB/month | Drag the `dist` folder onto app.netlify.com/drop, or connect GitHub (`netlify.toml`) |
+
+Whichever host you use, enter its address in TOGG under **Payments & links → Public web address** so the QR codes and SMS links point to it.
+
 ## 5. Turn on SMS (needs the Blaze plan)
 ```
 npx firebase deploy --only functions
