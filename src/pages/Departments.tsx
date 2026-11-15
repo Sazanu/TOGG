@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { ChevronRight, Network, Pencil, Phone, Plus, Trash2, User } from 'lucide-react';
 import { Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Textarea, cx, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -9,11 +9,18 @@ import { db } from '../lib/firebase';
 import { can } from '../lib/roles';
 import type { Department } from '../lib/types';
 
-export const MAIN_DEPARTMENTS = ['Administration', 'Organising', "Children's", 'Protocol', 'Financial', 'Media'];
+export const MAIN_DEPARTMENTS: { name: string; autoRule?: 'single' | 'married'; kind?: 'charity'; description?: string }[] = [
+  { name: 'Administration' }, { name: 'Organising' }, { name: "Children's" }, { name: 'Protocol' }, { name: 'Financial' }, { name: 'Media' },
+  { name: 'Evangelism & Follow-up' }, { name: 'Music & Drama' }, { name: "Women's Ministry" }, { name: 'Business Development' },
+  { name: 'Charity Foundation', kind: 'charity', description: 'Beneficiaries, aid, outreach and donations.' },
+  { name: 'Golden Heart 💛', autoRule: 'single', description: 'Ministry of the singles. Unmarried adult members are added automatically.' },
+  { name: 'Diamond Heart 💎', autoRule: 'married', description: 'Ministry of the married. Married members are added automatically.' },
+];
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 
 export default function Departments() {
   const { profile } = useAuth();
-  const { departments, deptTree, members, cells, scope, branchName, deptWithChildren } = useData();
+  const { departments, deptTree, members, scope, branchName, deptWithChildren } = useData();
   const toast = useToast();
   const manage = can(profile?.role, 'departments.manage');
   const mine = profile?.role === 'dept_leader' ? profile.departmentIds : null;
@@ -24,9 +31,20 @@ export default function Departments() {
   async function seed() {
     setSeeding(true);
     try {
-      const have = new Set(departments.map((d) => d.name.toLowerCase()));
-      for (const name of MAIN_DEPARTMENTS.filter((n) => !have.has(n.toLowerCase()))) {
-        await addDoc(collection(db, 'departments'), { name, parentId: null, headName: '', headPhone: '', assistantName: '', description: '', createdAt: serverTimestamp() });
+      for (const m of MAIN_DEPARTMENTS) {
+        const existing = departments.find((d) => norm(d.name) === norm(m.name));
+        if (existing) {
+          if ((m.autoRule && existing.autoRule !== m.autoRule) || (m.kind && existing.kind !== m.kind)) {
+            await updateDoc(doc(db, 'departments', existing.id), { autoRule: m.autoRule ?? null, kind: m.kind ?? null });
+          }
+          if (m.kind === 'charity') await setDoc(doc(db, 'settings', 'charity'), { departmentId: existing.id });
+          continue;
+        }
+        const added = await addDoc(collection(db, 'departments'), {
+          name: m.name, parentId: null, headName: '', headPhone: '', assistantName: '', description: m.description ?? '',
+          autoRule: m.autoRule ?? null, kind: m.kind ?? null, createdAt: serverTimestamp(),
+        });
+        if (m.kind === 'charity') await setDoc(doc(db, 'settings', 'charity'), { departmentId: added.id });
       }
       toast('ok', 'Main departments added.');
     } catch (e) { toast('err', errorText(e)); } finally { setSeeding(false); }
@@ -41,7 +59,7 @@ export default function Departments() {
         subtitle={mine ? 'Your departments, their members, cells and monthly reports.' : `Main departments and the departments under them. Counts are for ${scope === ALL ? 'all branches' : branchName(scope)}.`}
         actions={manage && (
           <>
-            {MAIN_DEPARTMENTS.some((n) => !departments.some((d) => d.name.toLowerCase() === n.toLowerCase())) && (
+            {MAIN_DEPARTMENTS.some((m) => !departments.some((d) => norm(d.name) === norm(m.name) && (d.autoRule ?? null) === (m.autoRule ?? null) && (d.kind ?? null) === (m.kind ?? null))) && (
               <Button variant="outline" loading={seeding} onClick={seed}>Add main departments</Button>
             )}
             <Button onClick={() => setCreating({ parentId: null })}><Plus className="h-4 w-4" /> Add department</Button>
@@ -58,7 +76,6 @@ export default function Departments() {
             {visible.map(({ dept: d, depth }) => {
               const ids = deptWithChildren(d.id);
               const count = members.filter((m) => m.departmentIds?.some((x) => ids.includes(x))).length;
-              const cellCount = cells.filter((c) => ids.includes(c.departmentId)).length;
               return (
                 <li key={d.id} className={cx('flex items-center gap-3 py-3 pr-3 sm:pr-5', depth ? 'bg-stone-50/50' : '')} style={{ paddingLeft: `${(mine ? 0 : depth) * 28 + 20}px` }}>
                   <div className={cx('rounded-xl p-2.5', depth ? 'bg-white text-royal-400' : 'bg-royal-50 text-royal-600')}><Network className="h-4 w-4" /></div>
@@ -67,7 +84,8 @@ export default function Departments() {
                       {depth > 0 && <span className="text-stone-400">↳ </span>}{d.name}
                     </div>
                     <div className="truncate text-xs text-stone-500">
-                      {d.headName ? `Head: ${d.headName}` : 'No head yet'}{d.headPhone && ` · ${d.headPhone}`}{cellCount ? ` · ${cellCount} cell${cellCount > 1 ? 's' : ''}` : ''}
+                      {d.headName ? `Head: ${d.headName}` : 'No head yet'}{d.headPhone && ` · ${d.headPhone}`}
+                      {d.autoRule && ' · members added automatically'}{d.kind === 'charity' && ' · has its own Charity module'}
                     </div>
                   </Link>
                   <div className="text-right text-sm"><b className="text-royal-950">{count}</b><div className="text-[11px] text-stone-500">members</div></div>
@@ -95,6 +113,7 @@ export function DeptForm({ dept, parentId, onClose }: { dept: Department | null;
   const [d, setD] = useState({
     name: dept?.name ?? '', parentId: dept ? dept.parentId ?? '' : parentId ?? '', headName: dept?.headName ?? '',
     headPhone: dept?.headPhone ?? '', assistantName: dept?.assistantName ?? '', description: dept?.description ?? '',
+    autoRule: dept?.autoRule ?? '', kind: dept?.kind ?? '',
   });
   const [busy, setBusy] = useState(false);
   const blocked = dept ? deptWithChildren(dept.id) : [];
@@ -103,9 +122,11 @@ export function DeptForm({ dept, parentId, onClose }: { dept: Department | null;
     e.preventDefault();
     setBusy(true);
     try {
-      const data = { ...d, name: d.name.trim(), parentId: d.parentId || null, updatedAt: serverTimestamp() };
+      const data = { ...d, name: d.name.trim(), parentId: d.parentId || null, autoRule: d.autoRule || null, kind: d.kind || null, updatedAt: serverTimestamp() };
+      let id = dept?.id;
       if (dept) await updateDoc(doc(db, 'departments', dept.id), data);
-      else await addDoc(collection(db, 'departments'), { ...data, createdAt: serverTimestamp() });
+      else id = (await addDoc(collection(db, 'departments'), { ...data, createdAt: serverTimestamp() })).id;
+      if (data.kind === 'charity' && id) await setDoc(doc(db, 'settings', 'charity'), { departmentId: id });
       toast('ok', 'Department saved.');
       onClose();
     } catch (err) { toast('err', errorText(err)); setBusy(false); }
@@ -135,6 +156,21 @@ export function DeptForm({ dept, parentId, onClose }: { dept: Department | null;
         </div>
         <Field label="Assistant"><Input value={d.assistantName} onChange={(e) => setD({ ...d, assistantName: e.target.value })} /></Field>
         <Field label="Description"><Textarea value={d.description} onChange={(e) => setD({ ...d, description: e.target.value })} /></Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Members join automatically">
+            <Select value={d.autoRule} onChange={(e) => setD({ ...d, autoRule: e.target.value as typeof d.autoRule })}>
+              <option value="">No — added by hand</option>
+              <option value="single">All unmarried adults (Golden Heart)</option>
+              <option value="married">All married members (Diamond Heart)</option>
+            </Select>
+          </Field>
+          <Field label="Special module">
+            <Select value={d.kind} onChange={(e) => setD({ ...d, kind: e.target.value as typeof d.kind })}>
+              <option value="">None</option>
+              <option value="charity">Charity Foundation</option>
+            </Select>
+          </Field>
+        </div>
         <p className="text-xs text-stone-500">To let the head log in and register members, ask them to sign up, then give them the <b>Department Head</b> role in <i>Users &amp; roles</i>.</p>
         <div className="flex items-center justify-between pt-2">
           {dept ? <Button type="button" variant="ghost" className="text-red-600" onClick={remove}><Trash2 className="h-4 w-4" /> Delete</Button> : <span />}

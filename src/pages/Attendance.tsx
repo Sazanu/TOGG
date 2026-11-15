@@ -17,9 +17,11 @@ export function useServices(scope: string, max = 60) {
     const base = collection(db, 'services');
     const q = scope === ALL
       ? query(base, orderBy('date', 'desc'), limit(max))
-      : query(base, where('branchId', '==', scope), orderBy('date', 'desc'), limit(max));
+      : query(base, where('branchId', '==', scope));
     return onSnapshot(q, (s) => {
-      setServices(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Service));
+      const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Service);
+      list.sort((a, b) => b.date.localeCompare(a.date));
+      setServices(list.slice(0, max));
       setLoading(false);
     }, (e) => { console.error('services', e); setLoading(false); });
   }, [scope, max]);

@@ -1,29 +1,35 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Building2, CalendarCheck, ClipboardList, Database, HandCoins, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
+  Building2, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
 import { ROLE_LABELS, can, type Capability } from '../lib/roles';
 import { Logo } from './Logo';
 import { Avatar, cx } from './ui';
+import { useCanCharity } from '../pages/Charity';
 
-interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability; section: string }
+interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability; section: string; charity?: boolean }
 
 const NAV: NavItem[] = [
   { section: '', to: '/', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
-  { section: 'People', to: '/members', label: 'Members', icon: <Users className="h-5 w-5" />, cap: 'members.read' },
+  { section: 'People', to: '/members', label: 'Members', icon: <Users className="h-5 w-5" />, cap: 'members.list' },
   { section: 'People', to: '/registrations', label: 'Sign-ups', icon: <Inbox className="h-5 w-5" />, cap: 'registrations.manage' },
   { section: 'People', to: '/attendance', label: 'Attendance', icon: <CalendarCheck className="h-5 w-5" />, cap: 'attendance.write' },
+  { section: 'People', to: '/prayer-requests', label: 'Prayer & testimonies', icon: <MessageCircleHeart className="h-5 w-5" />, cap: 'prayer.view' },
   { section: 'Money', to: '/tithes', label: 'Tithes', icon: <Wallet className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/giving', label: 'Giving & offerings', icon: <HandCoins className="h-5 w-5" />, cap: 'giving.read' },
+  { section: 'Money', to: '/welfare', label: 'Welfare', icon: <HandHeart className="h-5 w-5" />, cap: 'giving.read' },
+  { section: 'Money', to: '/projects', label: 'Projects', icon: <Hammer className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Ministry', to: '/departments', label: 'Departments', icon: <Network className="h-5 w-5" />, cap: 'departments.view' },
   { section: 'Ministry', to: '/reports', label: 'Dept. reports', icon: <ClipboardList className="h-5 w-5" />, cap: 'reports.view' },
   { section: 'Ministry', to: '/cells', label: 'Cells & growth', icon: <Home className="h-5 w-5" />, cap: 'cells.view' },
+  { section: 'Ministry', to: '/charity', label: 'Charity Foundation', icon: <HeartHandshake className="h-5 w-5" />, charity: true },
   { section: 'Ministry', to: '/messages', label: 'SMS messages', icon: <MessageSquare className="h-5 w-5" />, cap: 'sms.send' },
   { section: 'Admin', to: '/branches', label: 'Branches', icon: <Building2 className="h-5 w-5" />, cap: 'branches.manage' },
   { section: 'Admin', to: '/users', label: 'Users & roles', icon: <ShieldCheck className="h-5 w-5" />, cap: 'users.manage' },
+  { section: 'Admin', to: '/settings', label: 'Payments & links', icon: <CreditCard className="h-5 w-5" />, cap: 'data.manage' },
   { section: 'Admin', to: '/database', label: 'Database', icon: <Database className="h-5 w-5" />, cap: 'data.manage' },
 ];
 
@@ -31,7 +37,8 @@ export function Layout() {
   const { profile, signOut } = useAuth();
   const { branches, scope, setScope, canSwitchScope, branchName } = useData();
   const [open, setOpen] = useState(false);
-  const items = NAV.filter((n) => !n.cap || can(profile?.role, n.cap));
+  const canCharity = useCanCharity();
+  const items = NAV.filter((n) => (n.charity ? canCharity : !n.cap || can(profile?.role, n.cap)));
 
   const sidebar = (
     <div className="flex h-full flex-col bg-royal-950 text-royal-100">

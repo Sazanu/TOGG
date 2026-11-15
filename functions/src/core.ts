@@ -3,7 +3,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { makeProvider, type Provider } from './providers';
 
 export interface Audience {
-  type: 'all' | 'branch' | 'department' | 'cell' | 'category' | 'absentees' | 'custom' | 'members';
+  type: 'all' | 'branch' | 'department' | 'cell' | 'category' | 'absentees' | 'custom' | 'members' | 'welfare_defaulters';
   branchId?: string | null;
   departmentId?: string;
   cellId?: string;
@@ -14,7 +14,7 @@ export interface Audience {
   includeVisitors?: boolean;
 }
 
-export interface Recipient { phone: string; firstName: string; name: string }
+export interface Recipient { phone: string; firstName: string; name: string; vars?: Record<string, string> }
 
 export const DEFAULT_SETTINGS = {
   provider: 'log',
@@ -51,6 +51,59 @@ export function ghanaNow(now: Date) {
   return { date: iso.slice(0, 10), minutes: now.getUTCHours() * 60 + now.getUTCMinutes(), day: now.getUTCDay(), hour: now.getUTCHours(), md: iso.slice(5, 10) };
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const DEFAULT_WELFARE = {
+  amount: 20, startMonth: '2026-01', remindEnabled: false, remindDay: 5,
+  template: 'Dear {firstName}, your TOGG welfare dues for {months} (GH₵{amount}) are outstanding. Kindly pay via {link}. God bless you.',
+};
+
+export function monthsBetween(start: string, end: string): string[] {
+  const out: string[] = [];
+  let [y, m] = start.split('-').map(Number);
+  const [ey, em] = end.split('-').map(Number);
+  while ((y < ey || (y === ey && m <= em)) && out.length < 120) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } }
+  return out;
+}
+
+/** Link put in welfare reminders: the online payment page if set, otherwise the church's public /pay page. */
+export async function paymentLinkFor(db: Firestore, purpose: string): Promise<string> {
+  const p = (await db.doc('settings/payments').get()).data() ?? {};
+  if (p.paymentLink) return String(p.paymentLink);
+  const base = String(p.publicSiteUrl || `https://${process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'attendanceform-cdb69'}.web.app`).replace(/\/+$/, '');
+  return `${base}/pay?for=${purpose}`;
+}
+
+/** Active adult members (not excused) who have unpaid welfare months, with what they owe. */
+export async function welfareDefaulters(db: Firestore, branch: string | null, now: Date): Promise<Recipient[]> {
+  const w = { ...DEFAULT_WELFARE, ...((await db.doc('settings/welfare').get()).data() ?? {}) };
+  const current = now.toISOString().slice(0, 7);
+  const q = branch ? db.collection('members').where('branchId', '==', branch) : db.collection('members');
+  const members = (await q.get()).docs.map((d) => ({ id: d.id, ...d.data() })) as (DocumentData & { id: string })[];
+  const paid = new Map<string, Set<string>>();
+  (await db.collection('giving').where('type', '==', 'welfare').get()).docs.forEach((d) => {
+    const g = d.data();
+    if (!g.memberId) return;
+    const set = paid.get(g.memberId) ?? new Set<string>();
+    (Array.isArray(g.forMonths) && g.forMonths.length ? g.forMonths : [String(g.date).slice(0, 7)]).forEach((k: string) => set.add(k));
+    paid.set(g.memberId, set);
+  });
+  const link = await paymentLinkFor(db, 'welfare');
+  const out: Recipient[] = [];
+  for (const m of members) {
+    if (m.status !== 'active' || m.category !== 'adult' || m.welfareExempt) continue;
+    const phone = normalizePhone(m.phone);
+    if (!phone) continue;
+    const joined = typeof m.joinedAt === 'string' ? m.joinedAt.slice(0, 7) : '';
+    const from = joined && joined > w.startMonth ? joined : w.startMonth;
+    const owed = monthsBetween(from, current).filter((k) => !(paid.get(m.id) ?? new Set()).has(k));
+    if (!owed.length) continue;
+    const label = owed.map((k) => `${MONTHS[Number(k.slice(5)) - 1]} ${k.slice(0, 4)}`);
+    const months = label.length > 4 ? `${label.slice(0, 3).join(', ')} and ${label.length - 3} more` : label.join(', ');
+    out.push({ phone, firstName: m.firstName ?? '', name: `${m.firstName ?? ''} ${m.lastName ?? ''}`.trim(), vars: { months, amount: (owed.length * Number(w.amount || 0)).toFixed(2), link } });
+  }
+  return out;
+}
+
 export async function loadSettings(db: Firestore): Promise<Settings> {
   const s = await db.doc('settings/sms').get();
   return { ...DEFAULT_SETTINGS, ...(s.exists ? (s.data() as Partial<Settings>) : {}) };
@@ -79,13 +132,15 @@ async function deptAndChildren(db: Firestore, id: string): Promise<string[]> {
  * Works out who receives a message. `branchLock` (the message's branchId) always wins over the
  * audience's own branch, so a branch user can never text another branch.
  */
-export async function resolveRecipients(db: Firestore, a: Audience, branchLock: string | null): Promise<Recipient[]> {
+export async function resolveRecipients(db: Firestore, a: Audience, branchLock: string | null, now = new Date()): Promise<Recipient[]> {
   const branch = branchLock ?? a.branchId ?? null;
   const okStatus = (m: DocumentData) => m.status === 'active' || (a.includeVisitors && m.status === 'visitor');
   const inBranch = (m: DocumentData) => !branch || m.branchId === branch;
   let docs: DocumentData[] = [];
 
   switch (a.type) {
+    case 'welfare_defaulters':
+      return dedupe(await welfareDefaulters(db, branch, now));
     case 'custom':
       return dedupe((a.phones ?? []).map((p) => normalizePhone(p)).filter((p): p is string => !!p).map((phone) => ({ phone, firstName: '', name: '' })));
     case 'members': {
@@ -138,7 +193,7 @@ function dedupe(list: Recipient[]): Recipient[] {
 export async function deliver(provider: Provider, recipients: Recipient[], template: string, church: string) {
   const groups = new Map<string, string[]>();
   for (const r of recipients) {
-    const text = fillTemplate(template, { firstName: r.firstName || 'friend', name: r.name || 'friend', church });
+    const text = fillTemplate(template, { firstName: r.firstName || 'friend', name: r.name || 'friend', church, ...(r.vars ?? {}) });
     groups.set(text, [...(groups.get(text) ?? []), r.phone]);
   }
   let sent = 0; let failed = 0; let error = '';
@@ -173,7 +228,7 @@ export async function processMessage(db: Firestore, id: string, now = new Date()
   try {
     const settings = await loadSettings(db);
     const provider = providerOverride ?? (await loadProvider(db, settings));
-    const recipients = await resolveRecipients(db, claimed.audience ?? { type: 'custom' }, claimed.branchId ?? null);
+    const recipients = await resolveRecipients(db, claimed.audience ?? { type: 'custom' }, claimed.branchId ?? null, now);
     if (!recipients.length) {
       await ref.update({ status: 'failed', recipientsCount: 0, sentCount: 0, failedCount: 0, error: 'No recipients with a valid phone number.', finishedAt: FieldValue.serverTimestamp() });
       return { sent: 0, failed: 0 };
@@ -237,8 +292,19 @@ export async function runTick(db: Firestore, now = new Date(), providerOverride?
     }
   }
 
-  // 4. Send everything that is due: new automated ones, scheduled ones, and any stuck in the queue
-  const due = await db.collection('smsMessages').where('status', '==', 'scheduled').where('sendAt', '<=', Timestamp.fromDate(now)).get();
+  // 4. Monthly welfare reminders to members who owe (with the payment link)
+  const welfare = { ...DEFAULT_WELFARE, ...((await db.doc('settings/welfare').get()).data() ?? {}) };
+  if (welfare.remindEnabled && now.getUTCDate() === Number(welfare.remindDay) && g.hour >= 9) {
+    const marker = db.doc('meta/automation');
+    if ((await marker.get()).data()?.welfareOn !== g.date) {
+      await marker.set({ welfareOn: g.date }, { merge: true });
+      await queue({ branchId: null, message: welfare.template, audience: { type: 'welfare_defaulters' }, label: `Welfare reminder ${g.date.slice(0, 7)}` });
+    }
+  }
+
+  // 5. Send everything that is due: new automated ones, scheduled ones, and any stuck in the queue
+  const due = { docs: (await db.collection('smsMessages').where('status', '==', 'scheduled').get()).docs
+    .filter((d) => { const t = d.data().sendAt as Timestamp | undefined; return !!t && t.toMillis() <= now.getTime(); }) };
   const queued = await db.collection('smsMessages').where('status', '==', 'queued').get();
   const ids = new Set([...created, ...due.docs.map((d) => d.id), ...queued.docs.map((d) => d.id)]);
   for (const id of ids) await processMessage(db, id, now, providerOverride);

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { Building2, MapPin, Pencil, Phone, Plus, Trash2, User } from 'lucide-react';
-import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, errorText, useToast } from '../components/ui';
+import { Building2, Globe2, MapPin, Pencil, Phone, Plus, Trash2, User } from 'lucide-react';
+import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, errorText, useToast } from '../components/ui';
 import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import type { Branch } from '../lib/types';
@@ -9,11 +9,15 @@ import type { Branch } from '../lib/types';
 export default function Branches() {
   const { branches, members, scope } = useData();
   const [editing, setEditing] = useState<Branch | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<false | 'physical' | 'online'>(false);
 
   return (
     <div>
-      <PageHeader title="Branches" subtitle="Headquarters and every branch of the church." actions={<Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Add branch</Button>} />
+      <PageHeader title="Branches" subtitle="Headquarters, every branch, and the online branch for members who live abroad."
+        actions={<>
+          {!branches.some((b) => b.kind === 'online') && <Button variant="outline" onClick={() => setCreating('online')}><Globe2 className="h-4 w-4" /> Add online branch</Button>}
+          <Button onClick={() => setCreating('physical')}><Plus className="h-4 w-4" /> Add branch</Button>
+        </>} />
       {branches.length === 0 ? (
         <Card><Empty icon={<Building2 />} title="No branches yet">Start with your headquarters, then add each branch. Branch pastors and staff are attached to a branch.</Empty></Card>
       ) : (
@@ -21,9 +25,10 @@ export default function Branches() {
           {branches.map((b) => (
             <Card key={b.id} className="p-5">
               <div className="flex items-start justify-between">
-                <div className="rounded-xl bg-royal-50 p-2.5 text-royal-600"><Building2 className="h-5 w-5" /></div>
+                <div className="rounded-xl bg-royal-50 p-2.5 text-royal-600">{b.kind === 'online' ? <Globe2 className="h-5 w-5" /> : <Building2 className="h-5 w-5" />}</div>
                 <div className="flex items-center gap-1">
                   {b.isHQ && <Badge color="gold">Headquarters</Badge>}
+                  {b.kind === 'online' && <Badge color="blue">Online · abroad</Badge>}
                   <button onClick={() => setEditing(b)} className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-royal-700" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
                 </div>
               </div>
@@ -32,6 +37,7 @@ export default function Branches() {
                 {b.location && <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /> {b.location}</div>}
                 {b.pastorName && <div className="flex items-center gap-2"><User className="h-3.5 w-3.5" /> {b.pastorName}</div>}
                 {b.phone && <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5" /> {b.phone}</div>}
+                {b.groupLink && <a href={b.groupLink} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-royal-700 hover:underline"><Globe2 className="h-3.5 w-3.5" /> Online group</a>}
               </div>
               {scope === ALL && (
                 <div className="mt-4 border-t border-stone-100 pt-3 text-sm text-stone-600">
@@ -42,16 +48,16 @@ export default function Branches() {
           ))}
         </div>
       )}
-      {(creating || editing) && <BranchForm branch={editing} onClose={() => { setCreating(false); setEditing(null); }} />}
+      {(creating || editing) && <BranchForm branch={editing} kind={creating || 'physical'} onClose={() => { setCreating(false); setEditing(null); }} />}
     </div>
   );
 }
 
-function BranchForm({ branch, onClose }: { branch: Branch | null; onClose: () => void }) {
+function BranchForm({ branch, kind, onClose }: { branch: Branch | null; kind: 'physical' | 'online'; onClose: () => void }) {
   const toast = useToast();
   const [d, setD] = useState({
-    name: branch?.name ?? '', location: branch?.location ?? '', pastorName: branch?.pastorName ?? '',
-    phone: branch?.phone ?? '', isHQ: branch?.isHQ ?? false,
+    name: branch?.name ?? (kind === 'online' ? 'TOGG Online (Abroad)' : ''), location: branch?.location ?? (kind === 'online' ? 'Online (members abroad)' : ''), pastorName: branch?.pastorName ?? '',
+    phone: branch?.phone ?? '', isHQ: branch?.isHQ ?? false, kind: branch?.kind ?? kind, groupLink: branch?.groupLink ?? '',
   });
   const [busy, setBusy] = useState(false);
 
@@ -82,6 +88,17 @@ function BranchForm({ branch, onClose }: { branch: Branch | null; onClose: () =>
           <Field label="Resident pastor"><Input value={d.pastorName} onChange={(e) => setD({ ...d, pastorName: e.target.value })} /></Field>
           <Field label="Phone"><Input value={d.phone} onChange={(e) => setD({ ...d, phone: e.target.value })} /></Field>
         </div>
+        <Field label="Type of branch">
+          <Select value={d.kind} onChange={(e) => setD({ ...d, kind: e.target.value as 'physical' | 'online', location: e.target.value === 'online' && !d.location ? 'Online (members abroad)' : d.location })}>
+            <option value="physical">A physical branch</option>
+            <option value="online">Online branch — members who travelled or live abroad</option>
+          </Select>
+        </Field>
+        {d.kind === 'online' && (
+          <Field label="Online group link" hint="WhatsApp group, Telegram, Zoom or YouTube link where they meet.">
+            <Input type="url" value={d.groupLink} onChange={(e) => setD({ ...d, groupLink: e.target.value })} placeholder="https://chat.whatsapp.com/…" />
+          </Field>
+        )}
         <label className="flex items-center gap-2 text-sm text-stone-700">
           <input type="checkbox" checked={d.isHQ} onChange={(e) => setD({ ...d, isHQ: e.target.checked })} className="rounded border-stone-300" />
           This is the headquarters

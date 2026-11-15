@@ -1,5 +1,6 @@
+import { useProjects } from './Projects';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
+import { collection, doc, increment, onSnapshot, query, serverTimestamp, where, writeBatch } from 'firebase/firestore';
 import { ChevronLeft, ChevronRight, Download, HandCoins, Plus, Smartphone, Trash2, Wallet } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Spinner, Stat, Textarea, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -16,10 +17,11 @@ export function useGifts(scope: string, start: string, end: string) {
   useEffect(() => {
     setLoading(true);
     const base = collection(db, 'giving');
-    const parts = [where('date', '>=', start), where('date', '<=', end), orderBy('date', 'desc')];
-    const q = scope === ALL ? query(base, ...parts) : query(base, where('branchId', '==', scope), ...parts);
+    const q = scope === ALL ? query(base, where('date', '>=', start), where('date', '<=', end)) : query(base, where('branchId', '==', scope));
     return onSnapshot(q, (s) => {
-      setGifts(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Gift));
+      const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Gift).filter((g) => g.date >= start && g.date <= end);
+      list.sort((a, b) => b.date.localeCompare(a.date));
+      setGifts(list);
       setLoading(false);
     }, (e) => { console.error('giving', e); setLoading(false); });
   }, [scope, start, end]);
@@ -69,7 +71,13 @@ export default function Giving() {
 
   async function remove(g: Gift) {
     if (!confirm(`Delete this ${money(g.amount)} record?`)) return;
-    try { await deleteDoc(doc(db, 'giving', g.id)); toast('ok', 'Record deleted.'); }
+    try {
+      const b = writeBatch(db);
+      b.delete(doc(db, 'giving', g.id));
+      if (g.projectId) b.update(doc(db, 'projects', g.projectId), { raised: increment(-g.amount), donors: increment(-1) });
+      await b.commit();
+      toast('ok', 'Record deleted.');
+    }
     catch (e) { toast('err', errorText(e)); }
   }
 
@@ -200,7 +208,7 @@ export default function Giving() {
   );
 }
 
-export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: { type?: GivingType; memberId?: string; memberName?: string; branchId?: string } }) {
+export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: { type?: GivingType; memberId?: string; memberName?: string; branchId?: string; projectId?: string; forMonths?: string[]; amount?: number } }) {
   const { profile } = useAuth();
   const { branches, members, scope, branchName } = useData();
   const toast = useToast();
@@ -208,7 +216,9 @@ export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: 
   const [date, setDate] = useState(today());
   const [type, setType] = useState<GivingType>(preset?.type ?? 'tithe');
   const [method, setMethod] = useState<PaymentMethod>('cash');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(preset?.amount ? String(preset.amount) : '');
+  const projects = useProjects();
+  const [projectId, setProjectId] = useState(preset?.projectId ?? '');
   const [who, setWho] = useState(preset?.memberName ?? '');
   const [memberId, setMemberId] = useState<string | null>(preset?.memberId ?? null);
   const [reference, setReference] = useState('');
@@ -229,13 +239,19 @@ export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: 
     e.preventDefault();
     const amt = Number(amount);
     if (!(amt > 0)) { toast('err', 'Enter an amount greater than zero.'); return; }
+    if (type === 'project' && !projectId) { toast('err', 'Choose the project.'); return; }
     setBusy(true);
     try {
-      await addDoc(collection(db, 'giving'), {
-        branchId, date, type, method, amount: Math.round(amt * 100) / 100,
+      const value = Math.round(amt * 100) / 100;
+      const b = writeBatch(db);
+      b.set(doc(collection(db, 'giving')), {
+        branchId, date, type, method, amount: value,
         memberId, memberName: who.trim(), reference: reference.trim(), note: note.trim(),
+        projectId: type === 'project' ? projectId : null, forMonths: type === 'welfare' ? preset?.forMonths ?? [date.slice(0, 7)] : [],
         createdBy: profile?.uid, createdAt: serverTimestamp(),
       });
+      if (type === 'project') b.update(doc(db, 'projects', projectId), { raised: increment(value), donors: increment(1) });
+      await b.commit();
       toast('ok', `${money(amt)} recorded.`);
       if (another) {
         setAmount(''); setWho(''); setMemberId(null); setReference(''); setNote('');
@@ -256,6 +272,15 @@ export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: 
           </Field>
           <Field label="Amount (GH₵)"><Input required inputMode="decimal" type="number" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" /></Field>
         </div>
+        {type === 'project' && (
+          <Field label="Project">
+            <Select required value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">Choose…</option>
+              {(projects ?? []).filter((x) => x.status !== 'completed' || x.id === projectId).map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+            </Select>
+          </Field>
+        )}
+        {type === 'welfare' && preset?.forMonths && <p className="-mt-2 text-xs text-stone-500">For: {preset.forMonths.join(', ')}</p>}
         <Field label="Given by" hint={type === 'offering' ? 'Leave empty for a general service offering.' : 'Start typing to pick a member, or type any name.'}>
           <div className="relative">
             <Input value={who} onChange={(e) => { setWho(e.target.value); setMemberId(null); }} placeholder="Name (optional)" />

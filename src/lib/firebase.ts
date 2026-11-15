@@ -2,6 +2,7 @@ import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
 import { connectFirestoreEmulator, getFirestore, type Firestore } from 'firebase/firestore';
 import { connectFunctionsEmulator, getFunctions, type Functions } from 'firebase/functions';
+import { connectStorageEmulator, getStorage, type FirebaseStorage } from 'firebase/storage';
 
 // Throne of God's Grace — Firebase project.
 // (A Firebase *web* config is not a secret; access is controlled by firestore.rules.)
@@ -33,11 +34,13 @@ const auth: Auth = getAuth(app);
 const db: Firestore = getFirestore(app);
 // Must match the region in functions/src/index.ts
 const functions: Functions = getFunctions(app, 'europe-west1');
+const storage: FirebaseStorage = getStorage(app);
 
 if (usingEmulators) {
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
 }
 
-export { app, auth, db, functions };
+export { app, auth, db, functions, storage };

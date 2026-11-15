@@ -164,5 +164,43 @@ await t('birthday greetings once a day', async () => {
   eq(sentLog.length, 1);
 });
 
+console.log('Welfare dues reminders');
+await db.doc('settings/welfare').set({ amount: 20, startMonth: '2026-09', remindEnabled: true, remindDay: 15, template: 'Hi {firstName}, welfare for {months} (GH₵{amount}) is due. Pay: {link}' });
+await db.doc('settings/payments').set({ publicSiteUrl: 'https://togg.example' });
+await M('wpaid', { phone: '0261000001', joinedAt: '2025-01-01' });
+await M('wowes', { phone: '0261000002', joinedAt: '2025-01-01' });
+await M('wnew', { phone: '0261000003', joinedAt: '2026-11-02' });
+await M('wexempt', { phone: '0261000004', welfareExempt: true });
+await M('wkid', { phone: '0261000005', category: 'child' });
+await db.collection('giving').add({ type: 'welfare', memberId: 'wpaid', date: '2026-09-10', forMonths: ['2026-09', '2026-10'], amount: 40 });
+await db.collection('giving').add({ type: 'welfare', memberId: 'wpaid', date: '2026-11-03', amount: 20 }); // old-style record without forMonths
+await db.collection('giving').add({ type: 'welfare', memberId: 'wnew', date: '2026-11-05', forMonths: ['2026-11'], amount: 20 });
+const nov = new Date('2026-11-15T10:00:00Z');
+await t('works out who owes and how much', async () => {
+  const list = await core.welfareDefaulters(db, 'A', nov);
+  const by = Object.fromEntries(list.map((r) => [r.firstName, r.vars]));
+  if (by.wpaid) throw new Error('fully paid member listed');
+  if (by.wnew) throw new Error('new member listed for months before they joined');
+  if (by.wexempt || by.wkid) throw new Error('exempt member or child listed');
+  eq(by.wowes, { months: 'Sep 2026, Oct 2026, Nov 2026', amount: '60.00', link: 'https://togg.example/pay?for=welfare' });
+});
+await t('personalised reminder text', async () => {
+  reset();
+  await send({ branchId: 'A', message: 'Hi {firstName}, welfare for {months} (GH₵{amount}) is due. Pay: {link}', audience: { type: 'welfare_defaulters' } }, nov);
+  const t1 = sentLog.find((x) => x.to.includes('233261000002'));
+  eq(t1?.text, 'Hi wowes, welfare for Sep 2026, Oct 2026, Nov 2026 (GH₵60.00) is due. Pay: https://togg.example/pay?for=welfare');
+  if (sentLog.some((x) => x.to.includes('233261000001'))) throw new Error('texted someone who paid');
+});
+await t('automatic monthly reminder, once on the set day', async () => {
+  reset();
+  await core.runTick(db, new Date('2026-11-15T08:30:00Z'));
+  eq(sentLog.filter((x) => x.text.includes('welfare')).length, 0, 'before 9am;');
+  await core.runTick(db, new Date('2026-11-15T09:05:00Z'));
+  if (!sentLog.some((x) => x.to.includes('233261000002'))) throw new Error('not sent');
+  const n = sentLog.length;
+  await core.runTick(db, new Date('2026-11-15T09:30:00Z'));
+  eq(sentLog.filter((x) => x.text.includes('welfare')).length, sentLog.slice(0, n).filter((x) => x.text.includes('welfare')).length, 'sent twice;');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

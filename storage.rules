@@ -1,0 +1,18 @@
+rules_version = '2';
+// Voice notes and videos sent with prayer requests and testimonies.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /prayer/{requestId}/{file} {
+      // Anyone may send one (the public prayer form), within limits.
+      allow create: if resource == null && request.resource.size < 50 * 1024 * 1024
+        && (request.resource.contentType.matches('audio/.*') || request.resource.contentType.matches('video/.*'));
+      // Only active church staff can listen / watch.
+      allow read: if request.auth != null
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true;
+      allow update, delete: if false;
+    }
+    match /{all=**} {
+      allow read, write: if false;
+    }
+  }
+}

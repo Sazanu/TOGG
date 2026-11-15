@@ -7,7 +7,7 @@ import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Se
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { db, firebaseConfig, usingEmulators } from '../lib/firebase';
-import { ASSIGNABLE_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, isGlobal, type Role } from '../lib/roles';
+import { AREA_LABELS, ASSIGNABLE_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, areasForRole, isGlobal, type Area, type Role } from '../lib/roles';
 import type { AppUser } from '../lib/types';
 
 const ROLE_COLOR: Partial<Record<Role, 'gold' | 'royal' | 'green' | 'gray' | 'blue'>> = {
@@ -51,6 +51,7 @@ export default function Users() {
                     <div className="truncate text-xs text-stone-500">{u.email}{u.phone && ` · ${u.phone}`}</div>
                   </div>
                   <div className="hidden text-right text-xs text-stone-500 sm:block">{isGlobal(u.role) ? 'All branches' : u.branchId ? branchName(u.branchId) : '—'}</div>
+                  {(u.revoked?.length ?? 0) > 0 && <Badge color="gray">{u.revoked!.length} area{u.revoked!.length > 1 ? 's' : ''} off</Badge>}
                   <Badge color={u.active ? ROLE_COLOR[u.role] ?? 'royal' : 'red'}>{u.active ? ROLE_LABELS[u.role] : 'Disabled'}</Badge>
                   <button disabled={locked} onClick={() => setEditing(u)} className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-royal-700 disabled:invisible" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
                 </li>
@@ -60,12 +61,12 @@ export default function Users() {
         )}
       </Card>
       {editing && <UserForm user={editing} onClose={() => setEditing(null)} />}
-      {adding && <UserForm user={null} onClose={() => setAdding(false)} />}
+      {adding && <UserForm user={null} all={users} onClose={() => setAdding(false)} />}
     </div>
   );
 }
 
-function UserForm({ user, onClose }: { user: AppUser | null; onClose: () => void }) {
+function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () => void; all?: AppUser[] | null }) {
   const { profile } = useAuth();
   const { branches, deptTree, cells, deptWithChildren } = useData();
   const toast = useToast();
@@ -73,6 +74,7 @@ function UserForm({ user, onClose }: { user: AppUser | null; onClose: () => void
   const [branchId, setBranchId] = useState(user?.branchId ?? '');
   const [deptIds, setDeptIds] = useState<string[]>(user?.departmentIds ?? []);
   const [cellIds, setCellIds] = useState<string[]>(user?.cellIds ?? []);
+  const [revoked, setRevoked] = useState<Area[]>(user?.revoked ?? []);
   const [active, setActive] = useState(!user || user.role === 'pending' ? true : user.active);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -98,6 +100,7 @@ function UserForm({ user, onClose }: { user: AppUser | null; onClose: () => void
       departmentIds: fullDepts,
       cellIds: role === 'cell_leader' ? cellIds.filter((c) => cells.find((x) => x.id === c)?.branchId === branchId) : [],
       active: role === 'pending' ? false : active,
+      revoked: role === 'head_pastor' ? [] : revoked.filter((a) => areasForRole(role).includes(a)),
     };
     try {
       if (user) {
@@ -118,7 +121,15 @@ function UserForm({ user, onClose }: { user: AppUser | null; onClose: () => void
         } finally { await deleteApp(second); }
         setCreated({ email: email.trim(), password });
       }
-    } catch (err) { toast('err', errorText(err)); } finally { setBusy(false); }
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === 'auth/email-already-in-use') {
+        const existing = all?.find((u) => u.email?.toLowerCase() === email.trim().toLowerCase());
+        toast('err', existing
+          ? `${email} already has an account (${existing.displayName}). Close this and edit them in the list instead.`
+          : `${email} already has a login. Ask them to sign in once — they will then appear in this list as "Awaiting approval" and you can give them a role.`);
+      } else toast('err', errorText(err));
+    } finally { setBusy(false); }
   }
 
   if (created) {
@@ -193,6 +204,23 @@ function UserForm({ user, onClose }: { user: AppUser | null; onClose: () => void
                 })}
               </div>
             )}
+          </div>
+        )}
+        {role !== 'pending' && role !== 'head_pastor' && (
+          <div className="rounded-xl border border-stone-200 p-4">
+            <span className="block text-sm font-medium text-stone-700">What they can see</span>
+            <span className="mb-3 block text-xs text-stone-500">
+              {isGlobal(role) ? 'All branches.' : 'Only their own branch.'} Untick an area to take it away from this person.
+            </span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {areasForRole(role).map((a) => (
+                <label key={a} className="flex items-center gap-2 text-sm text-stone-700">
+                  <input type="checkbox" className="rounded border-stone-300" checked={!revoked.includes(a)}
+                    onChange={(e) => setRevoked(e.target.checked ? revoked.filter((x) => x !== a) : [...revoked, a])} />
+                  {AREA_LABELS[a]}
+                </label>
+              ))}
+            </div>
           </div>
         )}
         {role !== 'pending' && (

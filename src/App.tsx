@@ -26,6 +26,18 @@ import Cells from './pages/Cells';
 import CellDetail from './pages/CellDetail';
 import Messages from './pages/Messages';
 import Database from './pages/Database';
+import MemberProfile from './pages/MemberProfile';
+import Prayer from './pages/Prayer';
+import PublicPrayer from './pages/PublicPrayer';
+import Welfare from './pages/Welfare';
+import Projects, { ProjectDetail, PublicProject } from './pages/Projects';
+import Charity, { PublicCharity, useCanCharity } from './pages/Charity';
+import Settings from './pages/Settings';
+import PublicPay from './pages/PublicPay';
+
+function CharityGuard({ children }: { children: ReactNode }) {
+  return useCanCharity() ? <>{children}</> : <Navigate to="/" replace />;
+}
 
 function Guard({ cap, children }: { cap: Capability; children: ReactNode }) {
   const { profile } = useAuth();
@@ -43,7 +55,14 @@ function Private() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
-          <Route path="members" element={<Guard cap="members.read"><Members /></Guard>} />
+          <Route path="members" element={<Guard cap="members.list"><Members /></Guard>} />
+          <Route path="members/:id" element={<Guard cap="members.read"><MemberProfile /></Guard>} />
+          <Route path="prayer-requests" element={<Guard cap="prayer.view"><Prayer /></Guard>} />
+          <Route path="welfare" element={<Guard cap="giving.read"><Welfare /></Guard>} />
+          <Route path="projects" element={<Guard cap="giving.read"><Projects /></Guard>} />
+          <Route path="projects/:id" element={<Guard cap="giving.read"><ProjectDetail /></Guard>} />
+          <Route path="charity" element={<CharityGuard><Charity /></CharityGuard>} />
+          <Route path="settings" element={<Guard cap="data.manage"><Settings /></Guard>} />
           <Route path="attendance" element={<Guard cap="attendance.write"><Attendance /></Guard>} />
           <Route path="attendance/:serviceId" element={<Guard cap="attendance.write"><CheckIn /></Guard>} />
           <Route path="giving" element={<Guard cap="giving.read"><Giving /></Guard>} />
@@ -75,6 +94,10 @@ export default function App() {
           <Routes>
             <Route path="/join" element={<PublicForm kind="member" />} />
             <Route path="/visit" element={<PublicForm kind="visitor" />} />
+            <Route path="/prayer" element={<PublicPrayer />} />
+            <Route path="/pay" element={<PublicPay />} />
+            <Route path="/give/:id" element={<PublicProject />} />
+            <Route path="/charity-give" element={<PublicCharity />} />
             <Route path="/*" element={<Private />} />
           </Routes>
         </BrowserRouter>

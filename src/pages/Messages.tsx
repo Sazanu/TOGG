@@ -208,8 +208,12 @@ function HistoryList() {
   const [items, setItems] = useState<SmsMessage[] | null>(null);
   useEffect(() => {
     const base = collection(db, 'smsMessages');
-    const q = global && branch === ALL ? query(base, orderBy('createdAt', 'desc'), limit(100)) : query(base, where('branchId', '==', branch), orderBy('createdAt', 'desc'), limit(100));
-    return onSnapshot(q, (s) => setItems(s.docs.map((d) => ({ id: d.id, ...d.data() }) as SmsMessage)), (e) => { console.error(e); setItems([]); });
+    const q = global && branch === ALL ? query(base, orderBy('createdAt', 'desc'), limit(100)) : query(base, where('branchId', '==', branch));
+    return onSnapshot(q, (s) => {
+      const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as SmsMessage);
+      list.sort((a, b) => (b.createdAt?.toDate().getTime() ?? Date.now()) - (a.createdAt?.toDate().getTime() ?? Date.now()));
+      setItems(list.slice(0, 100));
+    }, (e) => { console.error(e); setItems([]); });
   }, [global, branch]);
 
   async function cancel(m: SmsMessage) {

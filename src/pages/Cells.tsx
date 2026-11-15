@@ -28,8 +28,8 @@ export function useCellReports(branch: string, start: string, end: string, cellI
     }
     const q = branch === ALL
       ? query(base, where('date', '>=', start), where('date', '<=', end))
-      : query(base, where('branchId', '==', branch), where('date', '>=', start), where('date', '<=', end));
-    return onSnapshot(q, (s) => setReports(map(s.docs)), (e) => console.error('cellReports', e));
+      : query(base, where('branchId', '==', branch));
+    return onSnapshot(q, (s) => setReports(map(s.docs).filter((r) => r.date >= start && r.date <= end)), (e) => console.error('cellReports', e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branch, start, end, key]);
   return reports;
@@ -37,21 +37,17 @@ export function useCellReports(branch: string, start: string, end: string, cellI
 
 export function useMyCells(): { cells: Cell[]; ids: string[] | null } {
   const { profile } = useAuth();
-  const { cells, deptWithChildren } = useData();
+  const { cells } = useData();
   if (profile?.role === 'cell_leader') {
     const mine = cells.filter((c) => profile.cellIds?.includes(c.id));
     return { cells: mine, ids: profile.cellIds ?? [] };
-  }
-  if (profile?.role === 'dept_leader') {
-    const depts = profile.departmentIds.flatMap(deptWithChildren);
-    return { cells: cells.filter((c) => depts.includes(c.departmentId)), ids: null };
   }
   return { cells, ids: null };
 }
 
 export default function Cells() {
   const { profile } = useAuth();
-  const { members, scope, branchName, deptName, departments } = useData();
+  const { members, scope, branchName } = useData();
   const { cells, ids } = useMyCells();
   const manage = can(profile?.role, 'cells.manage');
   const [month, setMonth] = useState(monthKey());
@@ -87,7 +83,7 @@ export default function Cells() {
 
   const grouped = useMemo(() => {
     const g = new Map<string, Cell[]>();
-    cells.forEach((c) => g.set(c.departmentId, [...(g.get(c.departmentId) ?? []), c]));
+    cells.forEach((c) => g.set(c.branchId, [...(g.get(c.branchId) ?? []), c]));
     return [...g.entries()];
   }, [cells]);
 
@@ -101,7 +97,7 @@ export default function Cells() {
             <Select value={month} onChange={(e) => setMonth(e.target.value)} className="!w-44 !py-2">
               {Array.from({ length: 12 }, (_, i) => shiftMonth(monthKey(), -i)).map((mk) => <option key={mk} value={mk}>{monthLabel(mk)}</option>)}
             </Select>
-            {manage && <Button onClick={() => setCreating(true)} disabled={!departments.length}><Plus className="h-4 w-4" /> New cell</Button>}
+            {manage && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New cell</Button>}
           </>
         }
       />
@@ -148,12 +144,12 @@ export default function Cells() {
       </div>
 
       {cells.length === 0 ? (
-        <Card><Empty icon={<Home />} title="No cells yet">{manage ? 'Create a cell under a department (for example Organising or Evangelism), give it a leader and start collecting meeting reports.' : 'No cells have been assigned to you yet.'}</Empty></Card>
+        <Card><Empty icon={<Home />} title="No cells yet">{manage ? 'Create a cell for an area or house fellowship, give it a leader and start collecting meeting reports.' : 'No cells have been assigned to you yet.'}</Empty></Card>
       ) : (
         <div className="space-y-6">
-          {grouped.map(([deptId, list]) => (
-            <Card key={deptId}>
-              <div className="border-b border-stone-100 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-stone-500">Under {deptName(deptId)}</div>
+          {grouped.map(([branchId, list]) => (
+            <Card key={branchId}>
+              <div className="border-b border-stone-100 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-stone-500">{branchName(branchId)}</div>
               <ul className="divide-y divide-stone-100">
                 {list.map((c) => {
                   const rs = thisMonth.filter((r) => r.cellId === c.id);
@@ -163,7 +159,7 @@ export default function Cells() {
                         <div className="rounded-xl bg-gold-50 p-2.5 text-gold-600"><Home className="h-4 w-4" /></div>
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-stone-900">{c.name} {!c.active && <Badge color="gray">inactive</Badge>}</div>
-                          <div className="truncate text-xs text-stone-500">{c.leaderName || 'No leader'} · {c.meetingDay} {c.meetingTime}{c.location && ` · ${c.location}`}{branch === ALL && ` · ${branchName(c.branchId)}`}</div>
+                          <div className="truncate text-xs text-stone-500">{c.leaderName || 'No leader'} · {c.meetingDay} {c.meetingTime}{c.location && ` · ${c.location}`}</div>
                         </div>
                         <div className="hidden text-right text-xs text-stone-500 sm:block">
                           <div><b className="text-stone-800">{members.filter((mm) => mm.cellId === c.id).length}</b> members</div>
@@ -186,12 +182,11 @@ export default function Cells() {
 
 export function CellForm({ cell, onClose }: { cell: Cell | null; onClose: () => void }) {
   const { profile } = useAuth();
-  const { branches, deptTree, scope, deptWithChildren } = useData();
+  const { branches, scope } = useData();
   const toast = useToast();
-  const allowedDepts = profile?.role === 'dept_leader' ? profile.departmentIds.flatMap(deptWithChildren) : null;
   const [d, setD] = useState({
     name: cell?.name ?? '', branchId: cell?.branchId ?? profile?.branchId ?? (scope !== ALL ? scope : branches[0]?.id ?? ''),
-    departmentId: cell?.departmentId ?? allowedDepts?.[0] ?? '', leaderName: cell?.leaderName ?? '', leaderPhone: cell?.leaderPhone ?? '',
+    leaderName: cell?.leaderName ?? '', leaderPhone: cell?.leaderPhone ?? '',
     location: cell?.location ?? '', meetingDay: cell?.meetingDay ?? 'Wednesday', meetingTime: cell?.meetingTime ?? '18:30', active: cell?.active ?? true,
   });
   const [busy, setBusy] = useState(false);
@@ -219,13 +214,7 @@ export function CellForm({ cell, onClose }: { cell: Cell | null; onClose: () => 
       <form onSubmit={save} className="space-y-4">
         <Field label="Cell name"><Input required value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} placeholder="e.g. Asokwa Cell, Grace Cell" /></Field>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Under department">
-            <Select required value={d.departmentId} onChange={(e) => setD({ ...d, departmentId: e.target.value })}>
-              <option value="">Choose…</option>
-              {deptTree.filter(({ dept }) => !allowedDepts || allowedDepts.includes(dept.id)).map(({ dept, depth }) => <option key={dept.id} value={dept.id}>{depth ? '↳ ' : ''}{dept.name}</option>)}
-            </Select>
-          </Field>
-          <Field label="Branch">
+          <Field label="Branch" className="col-span-2">
             <Select required value={d.branchId} disabled={!!profile?.branchId} onChange={(e) => setD({ ...d, branchId: e.target.value })}>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </Select>

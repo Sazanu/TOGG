@@ -54,6 +54,7 @@ export const GIVING_TYPES: { value: GivingType; label: string }[] = [
   { value: 'missions', label: 'Missions' },
   { value: 'welfare', label: 'Welfare' },
   { value: 'pledge', label: 'Pledge redemption' },
+  { value: 'project', label: 'Church project' },
   { value: 'other', label: 'Other' },
 ];
 

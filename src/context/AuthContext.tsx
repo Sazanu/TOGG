@@ -11,6 +11,7 @@ import {
 import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { AppUser } from '../lib/types';
+import { setRevokedAreas } from '../lib/roles';
 
 interface AuthState {
   user: User | null;
@@ -23,6 +24,8 @@ interface AuthState {
   setupOpen: () => Promise<boolean>;
   /** Makes the signed-in person the Head Pastor (Super Admin), only while setup is still open. */
   claimFirstAdmin: () => Promise<void>;
+  /** For a login with no profile: creates a "waiting for approval" profile so admins can see them. */
+  requestAccess: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
 }
 
@@ -34,6 +37,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => onAuthStateChanged(auth, (u) => {
+    // Stay "loading" until this person's profile has been read, so nobody is ever
+    // shown the waiting screen (or given a new profile) by mistake.
+    if (u) setLoading(true);
     setUser(u);
     if (!u) {
       setProfile(null);
@@ -47,7 +53,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return onSnapshot(
       doc(db, 'users', user.uid),
       (snap) => {
-        setProfile(snap.exists() ? ({ uid: snap.id, ...snap.data() } as AppUser) : null);
+        const p = snap.exists() ? ({ uid: snap.id, ...snap.data() } as AppUser) : null;
+        setRevokedAreas(p?.revoked);
+        setProfile(p);
         setLoading(false);
       },
       () => setLoading(false),
@@ -71,6 +79,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const setup = await tx.get(setupRef);
       firstAdmin = !setup.exists();
       if (!firstAdmin && onlyIfFirst) throw new Error('Setup is already complete. Ask the Head Pastor to give you access.');
+      // Never replace a profile that already exists.
+      if (!firstAdmin && (await tx.get(doc(db, 'users', u.uid))).exists()) return;
       const base = {
         email: (u.email ?? '').trim().toLowerCase(),
         displayName: name || u.displayName || (u.email ?? '').split('@')[0],
@@ -103,6 +113,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return !s.exists();
   }
 
+  async function requestAccess() {
+    if (!auth.currentUser) throw new Error('Sign in first.');
+    await createProfile(auth.currentUser, auth.currentUser.displayName ?? '', '', false);
+  }
+
   async function claimFirstAdmin() {
     if (!auth.currentUser) throw new Error('Sign in first.');
     await createProfile(auth.currentUser, profile?.displayName ?? auth.currentUser.displayName ?? '', profile?.phone ?? '', true);
@@ -117,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword, setupOpen, claimFirstAdmin }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, resetPassword, setupOpen, claimFirstAdmin, requestAccess }}>
       {children}
     </AuthContext.Provider>
   );

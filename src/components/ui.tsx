@@ -195,9 +195,18 @@ export function errorText(e: unknown): string {
     'auth/weak-password': 'Password must be at least 6 characters.',
     'auth/invalid-email': 'That email address is not valid.',
     'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/operation-not-allowed': 'Email/password sign-in is switched off. Turn it on in Firebase console → Authentication → Sign-in method.',
+    'auth/network-request-failed': 'No internet connection. Check your network and try again.',
+    'auth/user-disabled': 'This login has been disabled.',
+    'auth/missing-password': 'Please enter a password.',
     'permission-denied': 'You do not have permission to do that.',
+    'failed-precondition': 'The database needs its indexes. Run: npx firebase deploy --only firestore',
+    unavailable: 'Cannot reach the database right now. Check your internet connection.',
+    'storage/unauthorized': 'Uploading is not allowed. Deploy the storage rules (see README).',
+    'functions/not-found': 'The SMS service is not deployed yet (see README → Turning on SMS).',
   };
-  return map[code] ?? (e instanceof Error ? e.message : 'Something went wrong.');
+  const msg = e instanceof Error ? e.message : '';
+  return map[code] ?? (msg || `Something went wrong${code ? ` (${code})` : ''}.`);
 }
 
 export function Trash() {

@@ -7,9 +7,10 @@ rules_version = '2';
 //   secretary ..................................... own branch: members, attendance, sign-ups, cells, SMS
 //   finance ....................................... own branch: tithes/giving (+ read members)
 //   usher ......................................... own branch: attendance (+ read members, add first-time visitors)
-//   dept_leader (department head) ................. own branch: register/edit members of own departments, run their cells,
-//                                                   submit monthly report / budget / plan
-//   cell_leader ................................... own branch: reports for own cells, add new contacts as visitors
+//   dept_leader (department head) ................. ONLY members of their own departments; monthly report / budget / plan
+//   cell_leader ................................... ONLY their own cells: members, reports, new contacts
+// The Super Admin can switch areas off per user (users/{uid}.revoked): members, attendance, finance,
+// departments, cells, prayer, sms, charity.
 //   pending ....................................... nothing until approved
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -28,15 +29,19 @@ service cloud.firestore {
       return activeUser() && (isGlobal() || (me().branchId == branchId && me().role in roles));
     }
     function myDepts() { return me().get('departmentIds', []); }
+    function allowed(area) { return isHead() || !(area in me().get('revoked', [])); }
     function myCells() { return me().get('cellIds', []); }
     function cellData(id) { return get(/databases/$(database)/documents/cells/$(id)).data; }
 
-    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'cell_leader']); }
-    function canWriteMembers(b) { return hasRole(b, ['branch_pastor', 'secretary']); }
-    function canAttendance(b)   { return hasRole(b, ['branch_pastor', 'secretary', 'usher']); }
-    function canGiving(b)       { return hasRole(b, ['branch_pastor', 'finance']); }
-    function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']); }
-    function canSms(b)          { return isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary'])); }
+    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher']) && allowed('members'); }
+    function canWriteMembers(b) { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('members'); }
+    function canAttendance(b)   { return hasRole(b, ['branch_pastor', 'secretary', 'usher']) && allowed('attendance'); }
+    function canGiving(b)       { return hasRole(b, ['branch_pastor', 'finance']) && allowed('finance'); }
+    function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('members'); }
+    function canCells(b)        { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('cells'); }
+    function canSms(b)          { return (isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary']))) && allowed('sms'); }
+    function myCell(b, cellId)  { return roleIn('cell_leader', b) && allowed('cells') && cellId in myCells(); }
+    function myDeptMember(d)    { return roleIn('dept_leader', d.branchId) && allowed('members') && d.departmentIds.hasAny(myDepts()); }
 
     function validRole(r) {
       return r in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'cell_leader', 'pending'];
@@ -100,7 +105,7 @@ service cloud.firestore {
 
       allow update: if isGlobal() && request.auth.uid != uid
         && validAccess(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active', 'revoked'])
         && (isHead() || !(resource.data.role in ['head_pastor', 'associate_pastor']));
 
       allow delete: if isHead() && request.auth.uid != uid;
@@ -113,7 +118,7 @@ service cloud.firestore {
     }
 
     match /departments/{id} {
-      allow read: if activeUser();
+      allow read: if true; // names are shown on the public prayer form
       allow write: if isGlobal();
     }
 
@@ -131,19 +136,18 @@ service cloud.firestore {
         && before.toSet().difference(after.toSet()).hasOnly(myDepts().toSet());
     }
     function cellIsMine(cellId) {
-      return cellId is string && (
-        (me().role == 'cell_leader' && cellId in myCells())
-        || (me().role == 'dept_leader' && cellData(cellId).departmentId in myDepts())
-      );
+      return cellId is string && me().role == 'cell_leader' && allowed('cells') && cellId in myCells();
     }
 
     match /members/{id} {
-      allow read: if canReadMembers(resource.data.branchId);
+      allow read: if canReadMembers(resource.data.branchId)
+        || myDeptMember(resource.data)
+        || myCell(resource.data.branchId, resource.data.get('cellId', ''));
 
       allow create: if validMember(request.resource.data) && (
         canWriteMembers(request.resource.data.branchId)
         || (canAttendance(request.resource.data.branchId) && request.resource.data.status == 'visitor')
-        || (roleIn('dept_leader', request.resource.data.branchId) && request.resource.data.departmentIds.hasAny(myDepts()))
+        || myDeptMember(request.resource.data)
         || (activeUser() && me().branchId == request.resource.data.branchId && request.resource.data.status == 'visitor'
             && cellIsMine(request.resource.data.get('cellId', null)))
       );
@@ -151,9 +155,8 @@ service cloud.firestore {
       allow update: if validMember(request.resource.data) && (
         (canWriteMembers(resource.data.branchId) && canWriteMembers(request.resource.data.branchId))
         // department head: members of their departments, same branch
-        || (roleIn('dept_leader', resource.data.branchId)
+        || (myDeptMember(resource.data)
             && request.resource.data.branchId == resource.data.branchId
-            && resource.data.departmentIds.hasAny(myDepts())
             && deptChangeOk(resource.data.departmentIds, request.resource.data.departmentIds))
         // cell / department head: put someone in, or take them out of, their cell
         || (activeUser() && me().branchId == resource.data.branchId
@@ -198,30 +201,24 @@ service cloud.firestore {
     }
 
     // ---------- cells ----------
-    function canManageCell(d) {
-      return canWriteMembers(d.branchId) || (roleIn('dept_leader', d.branchId) && d.departmentId in myDepts());
-    }
+    // Cells stand on their own (not under a department). Names are public for the prayer form.
     match /cells/{id} {
-      allow read: if hasRole(resource.data.branchId, ['branch_pastor', 'secretary', 'dept_leader', 'cell_leader']);
-      allow create: if canManageCell(request.resource.data) && request.resource.data.name is string;
-      allow update: if canManageCell(resource.data) && canManageCell(request.resource.data);
-      allow delete: if canManageCell(resource.data);
+      allow read: if true;
+      allow create: if canCells(request.resource.data.branchId) && request.resource.data.name is string;
+      allow update: if canCells(resource.data.branchId) && canCells(request.resource.data.branchId);
+      allow delete: if canCells(resource.data.branchId);
     }
 
     match /cellReports/{id} {
       function canReport(d) {
         return d.cellId is string
           && cellData(d.cellId).branchId == d.branchId
-          && cellData(d.cellId).departmentId == d.departmentId
-          && (canWriteMembers(d.branchId)
-              || (roleIn('dept_leader', d.branchId) && d.departmentId in myDepts())
-              || (roleIn('cell_leader', d.branchId) && d.cellId in myCells()));
+          && (canCells(d.branchId) || myCell(d.branchId, d.cellId));
       }
-      allow read: if hasRole(resource.data.branchId, ['branch_pastor', 'secretary', 'dept_leader'])
-        || (roleIn('cell_leader', resource.data.branchId) && resource.data.cellId in myCells());
+      allow read: if canCells(resource.data.branchId) || myCell(resource.data.branchId, resource.data.cellId);
       allow create: if canReport(request.resource.data);
       allow update: if canReport(resource.data) && canReport(request.resource.data);
-      allow delete: if canWriteMembers(resource.data.branchId) || (roleIn('dept_leader', resource.data.branchId) && resource.data.departmentId in myDepts());
+      allow delete: if canCells(resource.data.branchId);
       allow create, update: if isGlobal();
     }
 
@@ -230,15 +227,15 @@ service cloud.firestore {
     match /deptReports/{id} {
       function part(i) { return id.split('_')[i]; }
       function isAuthor() {
-        return isGlobal() || (roleIn('dept_leader', part(1)) && part(0) in myDepts());
+        return allowed('departments') && (isGlobal() || (roleIn('dept_leader', part(1)) && part(0) in myDepts()));
       }
-      function isReviewer() { return isGlobal() || roleIn('branch_pastor', part(1)); }
+      function isReviewer() { return allowed('departments') && (isGlobal() || roleIn('branch_pastor', part(1))); }
       function matchesId(d) {
         return d.departmentId == part(0) && d.branchId == part(1) && d.month == part(2) && d.type == part(3)
           && d.type in ['report', 'budget', 'plan'];
       }
       allow get: if isAuthor() || isReviewer();
-      allow list: if isGlobal() || roleIn('branch_pastor', resource.data.branchId);
+      allow list: if allowed('departments') && (isGlobal() || roleIn('branch_pastor', resource.data.branchId));
       allow create: if isAuthor() && matchesId(request.resource.data) && request.resource.data.status in ['draft', 'submitted'];
       allow update: if isAuthor() && matchesId(request.resource.data)
         && request.resource.data.status in ['draft', 'submitted']
@@ -278,6 +275,70 @@ service cloud.firestore {
     match /settings/{id} {
       allow read: if activeUser();
       allow write: if isGlobal();
+    }
+    // MoMo number, payment link, bank details: shown on the public giving / project / charity pages.
+    match /settings/payments {
+      allow read: if true;
+      allow write: if isGlobal();
+    }
+
+    // ---------- Head Pastor's private assessments and reminders ----------
+    match /pastorNotes/{id} {
+      allow read, write: if isHead();
+    }
+
+    // ---------- church projects (fund-raising + progress) ----------
+    match /projects/{id} {
+      allow read: if resource.data.public == true || activeUser();
+      allow create, delete: if isGlobal() && allowed('finance');
+      allow update: if isGlobal() && allowed('finance');
+      // whoever records a contribution keeps the total up to date
+      allow update: if activeUser() && me().role in ['branch_pastor', 'finance'] && allowed('finance')
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['raised', 'donors']);
+    }
+
+    // ---------- Charity Foundation ----------
+    function canCharity() {
+      return activeUser() && allowed('charity') && (isGlobal()
+        || (me().role == 'dept_leader'
+            && exists(/databases/$(database)/documents/settings/charity)
+            && get(/databases/$(database)/documents/settings/charity).data.departmentId in myDepts()));
+    }
+    match /charity/{id} {
+      allow read, write: if canCharity();
+    }
+
+    // ---------- prayer requests & testimonies ----------
+    // Sent up the hierarchy; leaders above the chosen person can also see it,
+    // except requests for the Head Pastor, which stay private to him.
+    function canSeePrayer(d) {
+      return (d.toLevel == 'head_pastor' && isHead())
+        || (d.toLevel == 'associate_pastor' && isGlobal() && allowed('prayer'))
+        || (d.toLevel in ['branch_pastor', 'dept_leader', 'cell_leader'] && allowed('prayer')
+            && (isGlobal() || roleIn('branch_pastor', d.branchId)))
+        || (d.toLevel in ['dept_leader', 'cell_leader'] && roleIn('secretary', d.branchId) && allowed('prayer'))
+        || (d.toLevel == 'dept_leader' && roleIn('dept_leader', d.branchId) && allowed('prayer') && d.departmentId in myDepts())
+        || (d.toLevel == 'cell_leader' && roleIn('cell_leader', d.branchId) && allowed('prayer') && d.cellId in myCells());
+    }
+    match /prayerRequests/{id} {
+      allow create: if request.resource.data.keys().hasOnly(['kind', 'name', 'phone', 'phoneKey', 'branchId', 'toLevel', 'departmentId', 'cellId', 'text', 'mediaPath', 'mediaType', 'confidential', 'status', 'answerNote', 'memberId', 'createdAt'])
+        && request.resource.data.kind in ['prayer', 'testimony']
+        && request.resource.data.toLevel in ['cell_leader', 'dept_leader', 'branch_pastor', 'associate_pastor', 'head_pastor']
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30
+        && request.resource.data.text is string && request.resource.data.text.size() <= 4000
+        && request.resource.data.mediaPath is string && request.resource.data.mediaPath.size() <= 200
+        && (request.resource.data.mediaPath == '' || request.resource.data.mediaPath.matches('prayer/' + id + '/.*'))
+        && request.resource.data.mediaType in ['', 'audio', 'video']
+        && request.resource.data.status == 'new' && request.resource.data.memberId == '' && request.resource.data.answerNote == ''
+        && request.resource.data.branchId is string
+        && exists(/databases/$(database)/documents/branches/$(request.resource.data.branchId))
+        && request.resource.data.createdAt == request.time;
+      allow read: if canSeePrayer(resource.data);
+      allow update: if canSeePrayer(resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answerNote', 'memberId', 'updatedAt'])
+        && request.resource.data.status in ['new', 'praying', 'answered'];
+      allow delete: if isGlobal();
     }
 
     // SMS API key: admins can set it, nobody can read it back (only the server).

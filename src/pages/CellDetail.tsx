@@ -15,15 +15,14 @@ import { emptyMember } from './Members';
 export default function CellDetail() {
   const { id = '' } = useParams();
   const { profile } = useAuth();
-  const { cells, members, branchName, deptName, deptWithChildren } = useData();
+  const { cells, members, branchName } = useData();
   const toast = useToast();
   const cell = cells.find((c) => c.id === id);
   const role = profile?.role;
   const isCellLeader = role === 'cell_leader' && !!profile?.cellIds?.includes(id);
-  const isDeptHead = role === 'dept_leader' && !!cell && profile!.departmentIds.flatMap(deptWithChildren).includes(cell.departmentId);
-  const canManage = can(role, 'members.write') || (role === 'head_pastor' || role === 'associate_pastor') || isDeptHead;
+  const canManage = can(role, 'cells.manage');
   const canReport = canManage || isCellLeader;
-  const canEditCell = can(role, 'cells.manage') && (role !== 'dept_leader' || isDeptHead);
+  const canEditCell = canManage;
   const [reporting, setReporting] = useState<CellReport | null | 'new'>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -47,7 +46,7 @@ export default function CellDetail() {
       <Link to="/cells" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> Cells</Link>
       <PageHeader
         title={cell.name}
-        subtitle={`Under ${deptName(cell.departmentId)} · ${branchName(cell.branchId)} · ${cell.meetingDay}s ${cell.meetingTime}${cell.location ? ` · ${cell.location}` : ''}`}
+        subtitle={`${branchName(cell.branchId)} · ${cell.meetingDay}s ${cell.meetingTime}${cell.location ? ` · ${cell.location}` : ''}`}
         actions={
           <>
             {canEditCell && <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /> Edit</Button>}
@@ -95,7 +94,7 @@ export default function CellDetail() {
         <Card className="lg:col-span-2">
           <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4">
             <h2 className="font-semibold text-stone-900">Members <span className="text-stone-400">({inCell.length})</span></h2>
-            {canReport && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add</Button>}
+            {canManage && <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus className="h-4 w-4" /> Add</Button>}
           </div>
           {inCell.length === 0 ? <Empty title="No one in this cell yet" /> : (
             <ul className="max-h-[30rem] divide-y divide-stone-100 overflow-y-auto">
@@ -176,7 +175,7 @@ function CellReportForm({ cell, report, canDelete, onClose }: { cell: Cell; repo
       const clean = contacts.filter((c) => c.name.trim());
       const ref = report ? doc(db, 'cellReports', report.id) : doc(collection(db, 'cellReports'));
       batch.set(ref, {
-        ...d, cellId: cell.id, branchId: cell.branchId, departmentId: cell.departmentId,
+        ...d, cellId: cell.id, branchId: cell.branchId,
         firstTimers: Math.max(d.firstTimers, clean.length),
         newContacts: clean.map((c) => ({ name: c.name.trim(), phone: c.phone.trim(), addedAsMember: !!c.addedAsMember || c.register })),
         submittedByName: report?.submittedByName ?? profile?.displayName ?? '', submittedBy: profile?.uid ?? '',

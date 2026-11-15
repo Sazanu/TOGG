@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { collection, doc, limit, onSnapshot, orderBy, query, serverTimestamp, where, writeBatch, deleteDoc, type QueryConstraint } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, serverTimestamp, where, writeBatch, deleteDoc, type QueryConstraint } from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
 import { Copy, ExternalLink, Inbox, QrCode, Trash2, UserCheck } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Modal, PageHeader, Spinner, errorText, useToast } from '../components/ui';
 import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import { today } from '../lib/format';
+import { isLocalAddress, publicBase, usePayments } from '../lib/settings';
 import { reserveMembershipNos } from '../lib/counters';
 import type { Registration } from '../lib/types';
 
@@ -18,18 +19,25 @@ export default function Registrations() {
 
   useEffect(() => {
     setItems(null);
-    const c: QueryConstraint[] = [where('status', '==', tab), orderBy('createdAt', 'desc'), limit(200)];
+    const c: QueryConstraint[] = [where('status', '==', tab)];
     if (scope !== ALL) c.unshift(where('branchId', '==', scope));
     return onSnapshot(query(collection(db, 'registrations'), ...c),
-      (s) => setItems(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Registration)),
+      (s) => {
+        const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Registration);
+        list.sort((a, b) => (b.createdAt?.toDate().getTime() ?? Date.now()) - (a.createdAt?.toDate().getTime() ?? Date.now()));
+        setItems(list.slice(0, 300));
+      },
       (e) => { console.error(e); setItems([]); });
   }, [scope, tab]);
 
-  const origin = window.location.origin;
+  const payments = usePayments();
+  const origin = publicBase(payments);
+  const runningLocally = isLocalAddress(window.location.origin) && !payments.publicSiteUrl;
   const suffix = scope !== ALL ? `?branch=${scope}` : '';
   const links = [
     { title: 'Member registration', desc: 'Members fill in their own details. You approve them here.', url: `${origin}/join${suffix}` },
     { title: 'Visitor form', desc: 'For first-time guests: name, phone, who invited them, prayer requests.', url: `${origin}/visit${suffix}` },
+    { title: 'Prayer request & testimony', desc: 'Members send a prayer request or testimony by text, voice note or video.', url: `${origin}/prayer${suffix}` },
   ];
 
   async function approve(r: Registration) {
@@ -61,7 +69,14 @@ export default function Registrations() {
     <div>
       <PageHeader title="Sign-ups" subtitle="Share these links in WhatsApp groups, from the pulpit, or on a screen at the door." />
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2">
+      {runningLocally && (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          You are using the system from this computer, so phones cannot open its address. The links and QR codes below use the
+          public address <b>{origin}</b> — it works once the site is published (<code>npm run deploy:web</code>, see README).
+          You can change the address under <i>Settings → Payments &amp; links</i>.
+        </div>
+      )}
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
         {links.map((l) => (
           <Card key={l.title} className="p-5">
             <h3 className="font-semibold text-stone-900">{l.title}</h3>

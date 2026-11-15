@@ -1,18 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Clock, Crown, ShieldAlert } from 'lucide-react';
 import { Logo } from '../components/Logo';
 import { Button, Card, errorText } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 
 export default function Pending() {
-  const { profile, user, signOut, setupOpen, claimFirstAdmin } = useAuth();
+  const { profile, user, signOut, setupOpen, claimFirstAdmin, requestAccess } = useAuth();
   const [open, setOpen] = useState<boolean | null>(null);
   const [checkError, setCheckError] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const asked = useRef(false);
   useEffect(() => {
-    setupOpen().then(setOpen).catch((e) => { setOpen(null); setCheckError(errorText(e)); });
+    if (asked.current) return;
+    asked.current = true;
+    setupOpen().then(async (isOpen) => {
+      setOpen(isOpen);
+      // A login without a profile: list them for approval automatically.
+      if (!isOpen && !profile) await requestAccess().catch((e) => setCheckError(errorText(e)));
+    }).catch((e) => { setOpen(null); setCheckError(errorText(e)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

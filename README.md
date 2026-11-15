@@ -18,6 +18,21 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 | **Users and roles** | The super admin adds staff accounts directly or approves sign-ups |
 | **Database** | Shows the connected Firebase project and how many records are stored; full **backup** (.json and Excel) and **restore** |
 
+### New in this version
+- **Member profile page:** details, departments, cell, attendance record, tithe card, giving, prayer requests, answered prayers and testimonies.
+- **Head Pastor only:** rate each member's attendance, tithe, giving, cell and department service, prayer life, growth and conduct as *Good / Fair / Needs improvement*. Set reminders. Anything marked "needs improvement" and every reminder that is due shows on the dashboard under **For your attention**.
+- **Projects:** fundraising like GoFundMe for building work such as roofing. Shows the goal, money raised, how far the work has gone, milestones and progress news, with a shareable public page and QR code.
+- **Welfare dues:** a monthly amount per adult member, a register of who has paid and who hasn't, arrears, and **SMS reminders with the payment link** (by hand, or automatically each month).
+- **Prayer requests and testimonies:** sent through a public form by text, **voice note or video**. The sender chooses who receives it, following the church hierarchy (cell leader → department head → branch pastor → Associate Pastor → Head Pastor). Requests to the Head Pastor stay private.
+- **Charity Foundation:** people in need, aid given, support received (money and items), outreach, the foundation's balance, an Excel report and a public donation page.
+- **Departments:** Evangelism & Follow-up, Music & Drama, Women's Ministry, Business Development, Charity Foundation, **Golden Heart 💛** (unmarried adults) and **Diamond Heart 💎** (married members). The last two fill themselves from marital status.
+- **Cells** stand on their own (not under a department).
+- **Online branch** for members who have travelled or live abroad, with their group link.
+- **Access control:** department heads see only their department's members, cell leaders only their cell, finance only money, and branch staff only their branch. **The Super Admin can switch off any area for any person.**
+- **Payments & links:** your MoMo number, online payment link and bank details, used on every public giving page.
+
+👉 **To put it online, follow [DEPLOY.md](DEPLOY.md).**
+
 ## Roles
 
 | Role | Branches | Can do |
@@ -25,13 +40,13 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 | Head Pastor (Super Admin) | All | Everything, including appointing admins |
 | Associate Pastor (Admin) | All | Everything except changing the Head Pastor or other admins |
 | Branch Pastor | Own | Members, attendance, tithes and giving, cells, SMS; reviews department reports |
-| Secretary | Own | Members, attendance, sign-ups, cells, SMS (no money) |
-| Finance | Own | Tithes and giving |
+| Branch Administrator | Own | Members, attendance, sign-ups, cells, prayer requests, SMS (no money) |
+| Finance | Own | **Only money:** tithes, giving, welfare, projects |
 | Usher | Own | Attendance, and adding first-time visitors |
-| Department Head | Own | Registers and edits members of **their** departments (sub-departments included); runs their cells; submits the monthly report, budget and plan |
-| Cell Leader | Own | Meeting reports for their cells; adds new contacts as visitors |
+| Department Head | Own | **Only** members of their departments: registers and edits them; submits the monthly report, budget and plan |
+| Cell Leader | Own | **Only** their cell: its members, meeting reports and new contacts |
 
-These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **110 automated tests** check them (`npm run test:rules`).
+These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **147 automated tests** check them (`npm run test:rules`).
 
 ---
 
@@ -92,8 +107,9 @@ Until a provider is chosen, the system is in **Test mode**: messages are recorde
 npm run emulators   # local Auth + Firestore + Functions (needs Java)
 # .env.local:  VITE_USE_EMULATORS=true  VITE_FIREBASE_PROJECT_ID=demo-togg
 npm run dev
-npm run test:rules  # 110 security-rule tests
-npm run test:sms    # 17 SMS engine tests (audiences, reminders, absentees, birthdays…)
+npm run test:rules    # 147 security-rule tests
+npm run test:storage  # 8 voice-note / video upload tests
+npm run test:sms      # 20 SMS engine tests (audiences, reminders, absentees, birthdays, welfare…)
 npm run typecheck
 ```
 

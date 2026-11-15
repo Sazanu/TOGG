@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { collection, onSnapshot, orderBy, query, where, type Query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, where, type Query, type QueryDocumentSnapshot, type DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Branch, Cell, Department, Member } from '../lib/types';
 import { can, isGlobal } from '../lib/roles';
@@ -103,14 +103,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!profile?.active || !can(profile.role, 'cells.view')) { setCells([]); return; }
+    const sorted = (l: Cell[]) => [...l].sort((a, b) => a.name.localeCompare(b.name));
+    if (profile.role === 'cell_leader') {
+      // Cell leaders only ever load their own cells.
+      const found = new Map<string, Cell>();
+      const unsubs = (profile.cellIds ?? []).map((id) => onSnapshot(doc(db, 'cells', id), (d: DocumentSnapshot) => {
+        if (d.exists()) found.set(d.id, { id: d.id, ...d.data() } as Cell); else found.delete(d.id);
+        setCells(sorted([...found.values()]));
+      }, (e) => console.error('cell listener', e)));
+      if (!unsubs.length) setCells([]);
+      return () => unsubs.forEach((u) => u());
+    }
     const base = collection(db, 'cells');
     const q: Query = scope === ALL ? base : query(base, where('branchId', '==', scope));
-    return onSnapshot(q, (s) => {
-      const list = s.docs.map((d) => ({ id: d.id, ...d.data() }) as Cell);
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setCells(list);
-    }, (e) => console.error('cells listener', e));
-  }, [profile?.active, profile?.role, scope]);
+    return onSnapshot(q, (s) => setCells(sorted(s.docs.map((d) => ({ id: d.id, ...d.data() }) as Cell))), (e) => console.error('cells listener', e));
+  }, [profile?.active, profile?.role, profile?.cellIds, scope]);
 
   useEffect(() => {
     if (!profile?.active || !can(profile.role, 'members.read')) {
@@ -120,22 +127,32 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
     setMembersLoading(true);
     const base = collection(db, 'members');
-    let q: Query = base;
-    if (scope !== ALL) q = query(base, where('branchId', '==', scope));
-    return onSnapshot(
-      q,
-      (s) => {
-        const list = s.docs.map((d) => normalizeMember(d.id, d.data()));
-        list.sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
-        setMembers(list);
-        setMembersLoading(false);
-      },
-      (err) => {
-        console.error('members listener', err);
-        setMembersLoading(false);
-      },
-    );
-  }, [profile?.active, profile?.role, scope]);
+    // Each role only loads what it may see (the database rules enforce the same).
+    let queries: Query[];
+    if (profile.role === 'dept_leader') {
+      const d = profile.departmentIds ?? [];
+      queries = [];
+      for (let i = 0; i < d.length; i += 30) queries.push(query(base, where('branchId', '==', scope), where('departmentIds', 'array-contains-any', d.slice(i, i + 30))));
+    } else if (profile.role === 'cell_leader') {
+      queries = (profile.cellIds ?? []).map((c) => query(base, where('branchId', '==', scope), where('cellId', '==', c)));
+    } else {
+      queries = [scope === ALL ? base : query(base, where('branchId', '==', scope))];
+    }
+    if (!queries.length) { setMembers([]); setMembersLoading(false); return; }
+    const parts = new Map<number, QueryDocumentSnapshot[]>();
+    const publish = () => {
+      const byId = new Map<string, Member>();
+      parts.forEach((docs) => docs.forEach((d) => byId.set(d.id, normalizeMember(d.id, d.data()))));
+      const list = [...byId.values()];
+      list.sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+      setMembers(list);
+      if (parts.size === queries.length) setMembersLoading(false);
+    };
+    const unsubs = queries.map((q, i) => onSnapshot(q, (s) => { parts.set(i, s.docs); publish(); }, (err) => {
+      console.error('members listener', err); parts.set(i, []); publish();
+    }));
+    return () => unsubs.forEach((u) => u());
+  }, [profile?.active, profile?.role, profile?.departmentIds, profile?.cellIds, scope]);
 
   const value = useMemo<DataState>(() => {
     const bMap = new Map(branches.map((b) => [b.id, b.name]));

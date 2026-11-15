@@ -11,7 +11,15 @@ import { useGifts } from './Giving';
 import { useCellReports, useMyCells } from './Cells';
 import { useMonthReports } from './Reports';
 import { isoDate, monthKey, monthLabel } from '../lib/format';
-import { ClipboardList, Home, Sprout } from 'lucide-react';
+import { BellRing, ClipboardList, Home, Lock, Sprout } from 'lucide-react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { attentionItems, useOpenPastorNotes, ASSESS_LABEL } from '../lib/pastoral';
+import { ReminderForm } from './MemberProfile';
+import { usePrayerRequests } from './Prayer';
+import { useState } from 'react';
+import { Badge, Button } from '../components/ui';
+import { prettyDate } from '../lib/format';
 import type { Service } from '../lib/types';
 
 function greeting() {
@@ -41,14 +49,15 @@ export default function Dashboard() {
         subtitle={`${profile ? ROLE_LABELS[profile.role] : ''} · ${scope === ALL ? 'All branches' : branchName(scope)}`}
       />
 
+      {role === 'head_pastor' && <AttentionPanel />}
       {isGlobal(role) && (branches.length === 0 || departments.length === 0) && <SetupChecklist branches={branches.length} departments={departments.length} members={members.length} />}
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {can(role, 'members.read') && (
+        {can(role, 'members.list') && (
           <Stat label="Members" value={members.filter((m) => m.status !== 'visitor').length} icon={<Users className="h-4 w-4" />}
             sub={`${members.filter((m) => m.status !== 'visitor' && m.category === 'adult').length} adults · ${members.filter((m) => m.status !== 'visitor' && m.category === 'teen').length} teens · ${members.filter((m) => m.status !== 'visitor' && m.category === 'child').length} children · ${members.filter((m) => m.status === 'visitor').length} visitors`} />
         )}
-        {can(role, 'members.read') && (
+        {can(role, 'members.list') && (
           <Stat label="New this month" value={members.filter((m) => m.joinedAt >= start && m.joinedAt <= end).length} icon={<UserPlus className="h-4 w-4" />} sub={`Joined in ${MONTHS[now.getMonth()]}`} />
         )}
         {isGlobal(role) && <Stat label="Branches" value={branches.length} icon={<Building2 className="h-4 w-4" />} sub={`${departments.length} departments`} />}
@@ -80,7 +89,7 @@ export default function Dashboard() {
         )}
         {can(role, 'reports.view') && <ReportsWidget />}
         {can(role, 'cells.view') && <CellsWidget />}
-        {can(role, 'members.read') && <Birthdays />}
+        {can(role, 'members.list') && <Birthdays />}
       </div>
     </div>
   );
@@ -273,6 +282,49 @@ function CellsWidget() {
         <li className="flex justify-between"><span className="text-stone-600">New converts</span><b className="text-royal-700">{cv}</b></li>
         <li className="flex justify-between"><span className="flex items-center gap-1 text-stone-600"><Sprout className="h-3.5 w-3.5 text-emerald-600" /> Added to church</span><b className="text-emerald-700">{joined}</b></li>
       </ul>
+    </Card>
+  );
+}
+
+function AttentionPanel() {
+  const notes = useOpenPastorNotes(true);
+  const items = attentionItems(notes);
+  const { requests } = usePrayerRequests();
+  const forMe = requests.filter((r) => r.toLevel === 'head_pastor' && r.status === 'new');
+  const prayers = forMe.filter((r) => r.kind === 'prayer').length;
+  const testimonies = forMe.length - prayers;
+  const [adding, setAdding] = useState(false);
+  return (
+    <Card className="mb-6 overflow-hidden border-gold-200">
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-gold-50 to-white px-5 py-3">
+        <h2 className="flex items-center gap-2 font-semibold text-stone-900"><Lock className="h-4 w-4 text-gold-600" /> For your attention</h2>
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)}><BellRing className="h-4 w-4" /> Add reminder</Button>
+      </div>
+      {items.length === 0 && forMe.length === 0 ? (
+        <p className="px-5 py-4 text-sm text-stone-500">Nothing needs your attention. Mark members on their page (Fair / Needs improvement) or set reminders, and they will show here.</p>
+      ) : (
+        <ul className="divide-y divide-stone-100">
+          {forMe.length > 0 && (
+            <li className="flex items-center gap-3 px-5 py-3 text-sm">
+              <Badge color="royal">Prayer</Badge>
+              <span className="flex-1">Sent privately to you: {[prayers && `${prayers} new prayer request${prayers > 1 ? 's' : ''}`, testimonies && `${testimonies} testimon${testimonies > 1 ? 'ies' : 'y'}`].filter(Boolean).join(' and ')}</span>
+              <Link to="/prayer-requests" className="text-royal-700 hover:underline">Open</Link>
+            </li>
+          )}
+          {items.map((n) => (
+            <li key={n.id} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+              {n.rating ? <Badge color="red">{ASSESS_LABEL[n.rating]}</Badge> : <Badge color="gold">Reminder</Badge>}
+              <span className="min-w-0 flex-1">
+                {n.memberId ? <Link to={`/members/${n.memberId}`} className="font-medium text-royal-800 hover:underline">{n.memberName}</Link> : null}
+                {n.memberId ? ' · ' : ''}{n.area}{n.note && <span className="text-stone-500"> — {n.note}</span>}
+                {n.remindOn && <span className="ml-1 text-xs text-stone-400">({prettyDate(n.remindOn)})</span>}
+              </span>
+              <button className="text-xs text-royal-700 hover:underline" onClick={() => updateDoc(doc(db, 'pastorNotes', n.id), { done: true })}>Done</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {adding && <ReminderForm memberId="" memberName="" onClose={() => setAdding(false)} />}
     </Card>
   );
 }

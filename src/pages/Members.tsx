@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
 import { downloadExcel, normalizePhone, parseDateLoose } from '../lib/csv';
 import { reserveMembershipNos } from '../lib/counters';
+import { withAutoDepts } from '../lib/autoDepts';
+import { Link } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { ageFrom, initials, prettyDate, today } from '../lib/format';
 import { can } from '../lib/roles';
@@ -172,7 +174,7 @@ export default function Members() {
                         <div className="flex items-center gap-3">
                           <Avatar text={initials(m.firstName, m.lastName)} />
                           <div>
-                            <div className="font-medium text-stone-900">{m.firstName} {m.lastName}</div>
+                            <Link to={`/members/${m.id}`} className="font-medium text-stone-900 hover:text-royal-700 hover:underline">{m.firstName} {m.lastName}</Link>
                             <div className="text-xs text-stone-500">
                               {m.membershipNo && <span className="mr-1 font-mono text-royal-600">{m.membershipNo}</span>}
                               {CATEGORY_LABEL[m.category]}{ageFrom(m.dob) !== null && ` · ${ageFrom(m.dob)} yrs`}
@@ -200,14 +202,14 @@ export default function Members() {
             </div>
             <ul className="divide-y divide-stone-100 md:hidden">
               {filtered.map((m) => (
-                <li key={m.id} className="flex items-center gap-3 p-4" onClick={() => canEdit(m) && setEditing(m)}>
+                <li key={m.id}><Link to={`/members/${m.id}`} className="flex items-center gap-3 p-4">
                   <Avatar text={initials(m.firstName, m.lastName)} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium text-stone-900">{m.firstName} {m.lastName}</div>
                     <div className="truncate text-xs text-stone-500">{m.membershipNo ? `${m.membershipNo} · ` : ''}{m.phone || 'No phone'}{scope === ALL && ` · ${branchName(m.branchId)}`}</div>
                   </div>
                   <Badge color={STATUS_COLOR[m.status]}>{m.status}</Badge>
-                </li>
+                </Link></li>
               ))}
             </ul>
             <div className="border-t border-stone-100 px-4 py-3 text-xs text-stone-500">{filtered.length} of {members.length} shown</div>
@@ -249,7 +251,7 @@ function DeptChips({ value, onChange, allowed }: { value: string[]; onChange: (v
 
 export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetDept, presetCell }: { member: Member | null; defaultBranch: string; lockBranch: boolean; onClose: () => void; presetDept?: string; presetCell?: string }) {
   const { profile } = useAuth();
-  const { branches, cells } = useData();
+  const { branches, cells, departments } = useData();
   const toast = useToast();
   const isDeptHead = profile?.role === 'dept_leader';
   const fullWrite = can(profile?.role, 'members.write');
@@ -270,7 +272,9 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
     }
     setBusy(true);
     try {
-      const data = { ...d, firstName: d.firstName.trim(), lastName: d.lastName.trim(), cellId: d.cellId || null, updatedAt: serverTimestamp() };
+      // Golden Heart / Diamond Heart follow marital status (department heads cannot change other departments).
+      const departmentIds = fullWrite ? withAutoDepts(d, departments) : d.departmentIds;
+      const data = { ...d, departmentIds, firstName: d.firstName.trim(), lastName: d.lastName.trim(), cellId: d.cellId || null, updatedAt: serverTimestamp() };
       if (member) await updateDoc(doc(db, 'members', member.id), data);
       else {
         const membershipNo = d.membershipNo?.trim() || (await reserveMembershipNos(1))[0];
@@ -353,6 +357,12 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
         </div>
 
         <Field label="Notes"><Textarea value={d.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
+        {fullWrite && (
+          <label className="flex items-center gap-2 text-sm text-stone-700">
+            <input type="checkbox" checked={!!d.welfareExempt} onChange={(e) => set('welfareExempt', e.target.checked)} className="rounded border-stone-300" />
+            Excused from monthly welfare dues
+          </label>
+        )}
 
         <div className="flex items-center justify-between border-t border-stone-100 pt-4">
           {member && fullWrite ? <Button type="button" variant="ghost" className="text-red-600" onClick={remove} disabled={busy}><Trash2 className="h-4 w-4" /> Delete</Button> : <span />}
@@ -408,6 +418,7 @@ function MemberImport({ onClose }: { onClose: () => void }) {
         joinedAt: parseDateLoose(r.joinedAt) || today(), membershipNo: r.membershipNo, source: 'import',
       });
     });
+    ready.forEach((m) => { m.departmentIds = withAutoDepts(m, departments); });
     const needNos = ready.filter((m) => !m.membershipNo).length;
     const nos = await reserveMembershipNos(needNos);
     let n = 0;
