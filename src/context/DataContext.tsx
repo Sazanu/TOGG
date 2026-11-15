@@ -34,7 +34,7 @@ function normalizeMember(id: string, d: Record<string, unknown>): Member {
     branchId: str(d.branchId), departmentIds: Array.isArray(d.departmentIds) ? (d.departmentIds as string[]) : [],
     address: str(d.address ?? d.location), occupation: str(d.occupation), maritalStatus: str(d.maritalStatus),
     joinedAt: dateStr(d.joinedAt ?? d.dateAdded), notes: str(d.notes),
-    membershipNo: str(d.membershipNo), cellId: (d.cellId as string | null) ?? null, source: str(d.source) || (d.name && !d.firstName ? 'old-form' : ''),
+    membershipNo: str(d.membershipNo), title: str(d.title), cellId: (d.cellId as string | null) ?? null, source: str(d.source) || (d.name && !d.firstName ? 'old-form' : ''),
   };
 }
 

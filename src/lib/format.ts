@@ -121,6 +121,6 @@ export function smsParts(text: string): number {
   return n <= 160 ? 1 : Math.ceil(n / 153);
 }
 
-export function fullName(m: { firstName: string; lastName: string }): string {
-  return `${m.firstName} ${m.lastName}`.trim();
+export function fullName(m: { firstName: string; lastName: string; title?: string }): string {
+  return `${m.title ? `${m.title} ` : ''}${m.firstName} ${m.lastName}`.trim();
 }

@@ -71,6 +71,8 @@ export interface Member {
   source?: string;
   /** Not expected to pay monthly welfare dues. */
   welfareExempt?: boolean;
+  /** Rev., Mrs., Ps., Elder… (kept apart so SMS can still say "Dear Benjamin"). */
+  title?: string;
 }
 
 export interface Service {
@@ -259,6 +261,8 @@ export interface PrayerRequest {
   cellId: string;
   text: string;
   mediaPath: string;
+  /** Set when the recording is kept on Cloudinary (free) instead of Firebase Storage. */
+  mediaUrl?: string;
   mediaType: '' | 'audio' | 'video';
   confidential: boolean;
   status: 'new' | 'praying' | 'answered';

@@ -54,8 +54,8 @@ export default function Dashboard() {
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {can(role, 'members.list') && (
-          <Stat label="Members" value={members.filter((m) => m.status !== 'visitor').length} icon={<Users className="h-4 w-4" />}
-            sub={`${members.filter((m) => m.status !== 'visitor' && m.category === 'adult').length} adults · ${members.filter((m) => m.status !== 'visitor' && m.category === 'teen').length} teens · ${members.filter((m) => m.status !== 'visitor' && m.category === 'child').length} children · ${members.filter((m) => m.status === 'visitor').length} visitors`} />
+          <Stat label="Active members" value={members.filter((m) => m.status === 'active').length} icon={<Users className="h-4 w-4" />}
+            sub={`${members.filter((m) => m.status === 'active' && m.category === 'adult').length} adults · ${members.filter((m) => m.status === 'active' && m.category === 'teen').length} teens · ${members.filter((m) => m.status === 'active' && m.category === 'child').length} children · ${members.filter((m) => m.status === 'visitor').length} visitors · ${members.filter((m) => m.status === 'inactive').length} not active`} />
         )}
         {can(role, 'members.list') && (
           <Stat label="New this month" value={members.filter((m) => m.joinedAt >= start && m.joinedAt <= end).length} icon={<UserPlus className="h-4 w-4" />} sub={`Joined in ${MONTHS[now.getMonth()]}`} />

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes } from 'firebase/storage';
 import { CheckCircle2, Mic, Square, Trash2, Video } from 'lucide-react';
 import { FullLogo } from '../components/Logo';
 import { Button, Card, Field, Input, Select, Textarea, cx, errorText } from '../components/ui';
-import { db, storage } from '../lib/firebase';
+import { db } from '../lib/firebase';
+import { mediaReady, uploadPrayerMedia, useMediaSettings } from '../lib/media';
 import { PRAYER_LEVELS, type PrayerLevel } from '../lib/roles';
 import type { Branch, Cell, Department } from '../lib/types';
 
@@ -23,6 +23,8 @@ export default function PublicPrayer() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
+  const mediaSettings = useMediaSettings();
+  const canRecord = mediaReady(mediaSettings);
 
   useEffect(() => {
     getDocs(query(collection(db, 'branches'), orderBy('name'))).then((s) => {
@@ -61,16 +63,12 @@ export default function PublicPrayer() {
     setBusy(true); setError('');
     try {
       const refDoc = doc(collection(db, 'prayerRequests'));
-      let mediaPath = '';
-      if (media) {
-        const ext = media.blob.type.includes('mp4') ? 'mp4' : media.blob.type.includes('ogg') ? 'ogg' : media.blob.type.includes('quicktime') ? 'mov' : 'webm';
-        mediaPath = `prayer/${refDoc.id}/${media.type}.${ext}`;
-        await uploadBytes(ref(storage, mediaPath), media.blob, { contentType: media.blob.type || (media.type === 'audio' ? 'audio/webm' : 'video/mp4') });
-      }
+      let mediaPath = ''; let mediaUrl = '';
+      if (media) ({ mediaPath, mediaUrl } = await uploadPrayerMedia(refDoc.id, media.blob, media.type, mediaSettings));
       await setDoc(refDoc, {
         kind, name: d.name.trim().slice(0, 80), phone: d.phone.trim().slice(0, 30), phoneKey: d.phone.replace(/\D/g, '').slice(-9),
         branchId: d.branchId, toLevel: d.toLevel, departmentId: d.toLevel === 'dept_leader' ? d.departmentId : '', cellId: d.toLevel === 'cell_leader' ? d.cellId : '',
-        text: d.text.trim().slice(0, 4000), mediaPath, mediaType: media?.type ?? '', confidential: d.toLevel === 'head_pastor',
+        text: d.text.trim().slice(0, 4000), mediaPath, mediaUrl, mediaType: media?.type ?? '', confidential: d.toLevel === 'head_pastor',
         status: 'new', answerNote: '', memberId: '', createdAt: serverTimestamp(),
       });
       setDone(true);
@@ -135,7 +133,7 @@ export default function PublicPrayer() {
               <Field label={kind === 'prayer' ? 'Your prayer request' : 'Your testimony'}>
                 <Textarea rows={4} maxLength={4000} value={d.text} onChange={(e) => set('text', e.target.value)} placeholder="Type here, or record a voice note or video below" />
               </Field>
-              <div className="rounded-xl border border-dashed border-stone-300 p-3">
+              {canRecord && <div className="rounded-xl border border-dashed border-stone-300 p-3">
                 {media ? (
                   <div>
                     {media.type === 'audio' ? <audio src={media.url} controls className="w-full" /> : <video src={media.url} controls className="max-h-60 w-full rounded-lg bg-black" />}
@@ -151,7 +149,7 @@ export default function PublicPrayer() {
                     {recording && <span className="flex items-center gap-1 text-sm text-red-600"><span className="h-2 w-2 animate-pulse rounded-full bg-red-600" /> Recording…</span>}
                   </div>
                 )}
-              </div>
+              </div>}
               {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
               <Button type="submit" loading={busy} className="w-full">Send</Button>
             </form>

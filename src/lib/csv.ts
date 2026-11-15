@@ -28,13 +28,17 @@ export function downloadJson(filename: string, data: unknown): void {
   URL.revokeObjectURL(url);
 }
 
-export interface Sheet { headers: string[]; rows: Record<string, string>[] }
+export interface Sheet { headers: string[]; rows: Record<string, string>[]; sheets: string[]; sheet: string }
 
 /** Reads .xlsx, .xls or .csv. Every cell comes back as a trimmed string; dates as YYYY-MM-DD. */
-export async function readSheet(file: File): Promise<Sheet> {
+export async function readSheet(file: File, sheetName?: string): Promise<Sheet> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  // Pick the requested sheet, else one named like "import"/"members", else the one with the most rows.
+  const size = (n: string) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1 }).length;
+  const name = sheetName && wb.Sheets[sheetName] ? sheetName
+    : wb.SheetNames.find((n) => /import|member/i.test(n)) ?? [...wb.SheetNames].sort((a, b) => size(b) - size(a))[0];
+  const ws = wb.Sheets[name];
   const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '', raw: true });
   const headers = raw.length ? Object.keys(raw[0]) : [];
   const rows = raw.map((r) => {
@@ -45,7 +49,7 @@ export async function readSheet(file: File): Promise<Sheet> {
     }
     return out;
   }).filter((r) => Object.values(r).some((v) => v !== ''));
-  return { headers, rows };
+  return { headers, rows, sheets: wb.SheetNames, sheet: name };
 }
 
 /** Accepts 2024-03-05, 05/03/2024 (day first, as used in Ghana), 5-Mar-2024, Excel serials. */
@@ -74,7 +78,10 @@ export function parseDateLoose(v: string): string {
 
 /** Ghana numbers to a comparable local form: 0241234567. */
 export function normalizePhone(v: string): string {
-  let d = (v || '').replace(/\D/g, '');
+  const raw = (v || '').trim();
+  let d = raw.replace(/\D/g, '');
+  // keep foreign numbers (e.g. +231…) in international form
+  if (raw.startsWith('+') && !d.startsWith('233')) return d ? `+${d}` : '';
   if (d.startsWith('233')) d = '0' + d.slice(3);
   if (d.length === 9) d = '0' + d;
   return d;

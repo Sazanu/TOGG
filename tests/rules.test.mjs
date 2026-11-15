@@ -239,6 +239,13 @@ await t('…with a voice note path for that request only', async () => {
   await assertSucceeds(setDoc(doc(anon(), 'prayerRequests/p2'), pr({ mediaPath: 'prayer/p2/audio.webm', mediaType: 'audio' })));
   await assertFails(setDoc(doc(anon(), 'prayerRequests/p3'), pr({ mediaPath: 'prayer/other/x.webm', mediaType: 'audio' })));
 });
+await t('…or a free Cloudinary recording link', () => assertSucceeds(setDoc(doc(anon(), 'prayerRequests/cl1'), pr({ mediaUrl: 'https://res.cloudinary.com/togg/video/upload/v1/togg-prayer/cl1-audio-123.webm', mediaType: 'audio' }))));
+await t('…but not a link to some other website', () => assertFails(setDoc(doc(anon(), 'prayerRequests/cl2'), pr({ mediaUrl: 'https://evil.example/x.mp3', mediaType: 'audio' }))));
+await t('media settings: public can read, only admins change', async () => {
+  await assertSucceeds(setDoc(doc(db('head'), 'settings/media'), { provider: 'cloudinary', cloudName: 'togg', uploadPreset: 'p' }));
+  await assertSucceeds(getDoc(doc(anon(), 'settings/media')));
+  await assertFails(setDoc(doc(db('bpA'), 'settings/media'), { provider: 'firebase' }));
+});
 await t('private request to the Head Pastor', () => assertSucceeds(setDoc(doc(anon(), 'prayerRequests/hp'), pr({ toLevel: 'head_pastor', confidential: true }))));
 await t('cannot pre-mark answered', () => assertFails(setDoc(doc(anon(), 'prayerRequests/p4'), pr({ status: 'answered' }))));
 await t('public cannot read prayer requests', () => assertFails(getDoc(doc(anon(), 'prayerRequests/p1'))));

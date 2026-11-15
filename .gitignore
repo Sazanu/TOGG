@@ -13,3 +13,6 @@ ui-debug.log
 # never commit service-account keys
 *service-account*.json
 *-firebase-adminsdk-*.json
+
+# Church member records (personal data) — never commit to a public repository
+records/

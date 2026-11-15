@@ -47,10 +47,10 @@ export function usePrayerRequests() {
   return { requests, loading };
 }
 
-function Media({ path, type }: { path: string; type: PrayerRequest['mediaType'] }) {
-  const [url, setUrl] = useState('');
+function Media({ path, url: direct, type }: { path: string; url?: string; type: PrayerRequest['mediaType'] }) {
+  const [url, setUrl] = useState(direct ?? '');
   const [err, setErr] = useState('');
-  useEffect(() => { getDownloadURL(ref(storage, path)).then(setUrl).catch((e) => setErr(errorText(e))); }, [path]);
+  useEffect(() => { if (!direct && path) getDownloadURL(ref(storage, path)).then(setUrl).catch((e) => setErr(errorText(e))); }, [path, direct]);
   if (err) return <p className="text-xs text-red-600">Could not load the recording: {err}</p>;
   if (!url) return <p className="text-xs text-stone-400">Loading recording…</p>;
   return type === 'video' ? <video src={url} controls className="mt-2 max-h-64 w-full rounded-xl bg-black" /> : <audio src={url} controls className="mt-2 w-full" />;
@@ -77,7 +77,7 @@ export function PrayerCard({ r, compact, onLink }: { r: PrayerRequest; compact?:
       </div>
       {!compact && <div className="mt-0.5 text-xs text-stone-500">{r.phone} · {branchName(r.branchId)} · to {LEVEL_LABEL[r.toLevel]}{r.departmentId ? ` (${deptName(r.departmentId)})` : ''}{r.cellId ? ` (${cellName(r.cellId)})` : ''}</div>}
       {r.text && <p className="mt-2 whitespace-pre-line text-sm text-stone-700">{r.text}</p>}
-      {r.mediaPath && <Media path={r.mediaPath} type={r.mediaType} />}
+      {(r.mediaPath || r.mediaUrl) && <Media path={r.mediaPath} url={r.mediaUrl} type={r.mediaType} />}
       {r.answerNote && <p className="mt-2 rounded-lg bg-emerald-50 px-2 py-1 text-xs text-emerald-800">🙌 {r.answerNote}</p>}
       {!compact && r.kind === 'prayer' && (
         <div className="mt-3 flex flex-wrap gap-2">

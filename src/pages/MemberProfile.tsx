@@ -38,11 +38,11 @@ export default function MemberProfile() {
         <div className="flex flex-col gap-4 bg-royal-950 p-6 text-white sm:flex-row sm:items-center">
           <Avatar text={initials(m.firstName, m.lastName)} className="!h-16 !w-16 bg-gold-400 !text-xl text-royal-950" />
           <div className="flex-1">
-            <h1 className="font-display text-2xl font-bold">{m.firstName} {m.lastName}</h1>
+            <h1 className="font-display text-2xl font-bold">{m.title && <span className="text-royal-300">{m.title} </span>}{m.firstName} {m.lastName}</h1>
             <div className="mt-1 flex flex-wrap gap-2 text-sm text-royal-200">
               {m.membershipNo && <span className="font-mono text-gold-300">{m.membershipNo}</span>}
               <span>{branchName(m.branchId)}</span>
-              <Badge color={m.status === 'active' ? 'green' : m.status === 'visitor' ? 'gold' : 'gray'}>{m.status}</Badge>
+              <Badge color={m.status === 'active' ? 'green' : m.status === 'visitor' ? 'gold' : 'gray'}>{m.status === 'inactive' ? 'not active' : m.status}</Badge>
             </div>
           </div>
           <div className="flex gap-2">

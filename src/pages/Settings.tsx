@@ -4,6 +4,7 @@ import { ExternalLink } from 'lucide-react';
 import { Button, Card, Field, Input, PageHeader, Textarea, errorText, useToast } from '../components/ui';
 import { db, firebaseConfig } from '../lib/firebase';
 import { publicBase, usePayments } from '../lib/settings';
+import { useMediaSettings, type MediaSettings } from '../lib/media';
 import type { PaymentSettings } from '../lib/types';
 
 export default function Settings() {
@@ -49,6 +50,51 @@ export default function Settings() {
         </Card>
         <div className="flex justify-end"><Button type="submit">Save</Button></div>
       </form>
+      <MediaStorage />
     </div>
+  );
+}
+
+function MediaStorage() {
+  const toast = useToast();
+  const saved = useMediaSettings();
+  const [d, setD] = useState<MediaSettings | null>(null);
+  useEffect(() => { if (!d && saved) setD(saved); }, [saved, d]);
+  if (!d) return null;
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    try { await setDoc(doc(db, 'settings', 'media'), { ...d, cloudName: d!.cloudName.trim(), uploadPreset: d!.uploadPreset.trim(), updatedAt: serverTimestamp() }); toast('ok', 'Saved.'); }
+    catch (err) { toast('err', errorText(err)); }
+  }
+  return (
+    <form onSubmit={save} className="mt-6">
+      <Card className="space-y-4 p-6">
+        <h2 className="font-semibold text-stone-900">Voice notes &amp; videos (prayer requests)</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {([['cloudinary', 'Cloudinary — free', 'Free plan, about 25 GB a month, no card. Recommended.'], ['firebase', 'Firebase Storage', 'Needs the Firebase Blaze (pay-as-you-go) plan.']] as const).map(([v, t, h]) => (
+            <label key={v} className={`cursor-pointer rounded-xl border p-3 ${d.provider === v ? 'border-royal-500 bg-royal-50' : 'border-stone-200'}`}>
+              <input type="radio" className="mr-2" checked={d.provider === v} onChange={() => setD({ ...d, provider: v })} />
+              <b className="text-sm">{t}</b><p className="mt-1 text-xs text-stone-500">{h}</p>
+            </label>
+          ))}
+        </div>
+        {d.provider === 'cloudinary' && (
+          <>
+            <ol className="list-decimal space-y-1 rounded-xl bg-stone-50 p-4 pl-8 text-sm text-stone-600">
+              <li>Create a free account at <a className="text-royal-700 underline" href="https://cloudinary.com/users/register_free" target="_blank" rel="noreferrer">cloudinary.com</a>.</li>
+              <li>Copy your <b>Cloud name</b> from the Cloudinary dashboard.</li>
+              <li>Settings → <b>Upload</b> → <b>Add upload preset</b> → Signing mode: <b>Unsigned</b> → Folder: <code>togg-prayer</code> → Save, and copy the preset name.</li>
+              <li>Paste both below and press Save. The record button then appears on the prayer form.</li>
+            </ol>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Cloud name"><Input value={d.cloudName} onChange={(e) => setD({ ...d, cloudName: e.target.value })} placeholder="e.g. togg-church" /></Field>
+              <Field label="Unsigned upload preset"><Input value={d.uploadPreset} onChange={(e) => setD({ ...d, uploadPreset: e.target.value })} placeholder="e.g. togg_prayer" /></Field>
+            </div>
+            <p className="text-xs text-stone-500">Privacy: each recording gets a long random web address that is only shown to church staff inside TOGG. Anyone who is given that exact link could play it.</p>
+          </>
+        )}
+        <div className="flex justify-end"><Button type="submit">Save</Button></div>
+      </Card>
+    </form>
   );
 }

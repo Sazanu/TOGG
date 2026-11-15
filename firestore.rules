@@ -281,6 +281,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isGlobal();
     }
+    // Where voice notes / videos are uploaded (the public prayer form needs to know).
+    match /settings/media {
+      allow read: if true;
+      allow write: if isGlobal();
+    }
 
     // ---------- Head Pastor's private assessments and reminders ----------
     match /pastorNotes/{id} {
@@ -321,7 +326,10 @@ service cloud.firestore {
         || (d.toLevel == 'cell_leader' && roleIn('cell_leader', d.branchId) && allowed('prayer') && d.cellId in myCells());
     }
     match /prayerRequests/{id} {
-      allow create: if request.resource.data.keys().hasOnly(['kind', 'name', 'phone', 'phoneKey', 'branchId', 'toLevel', 'departmentId', 'cellId', 'text', 'mediaPath', 'mediaType', 'confidential', 'status', 'answerNote', 'memberId', 'createdAt'])
+      allow create: if request.resource.data.keys().hasOnly(['kind', 'name', 'phone', 'phoneKey', 'branchId', 'toLevel', 'departmentId', 'cellId', 'text', 'mediaPath', 'mediaUrl', 'mediaType', 'confidential', 'status', 'answerNote', 'memberId', 'createdAt'])
+        && (!('mediaUrl' in request.resource.data) || request.resource.data.mediaUrl == ''
+            || (request.resource.data.mediaUrl is string && request.resource.data.mediaUrl.size() < 400
+                && request.resource.data.mediaUrl.matches('https://res[.]cloudinary[.]com/.*')))
         && request.resource.data.kind in ['prayer', 'testimony']
         && request.resource.data.toLevel in ['cell_leader', 'dept_leader', 'branch_pastor', 'associate_pastor', 'head_pastor']
         && request.resource.data.name is string && request.resource.data.name.size() <= 80

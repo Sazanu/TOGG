@@ -29,15 +29,17 @@ export function ImportWizard({ title, fields, options, help, onImport, onClose }
   const fileRef = useRef<HTMLInputElement>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [fileName, setFileName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [map, setMap] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<ImportResult | null>(null);
 
-  async function pick(file: File) {
+  async function pick(f: File, sheet?: string) {
     setError('');
     try {
-      const s = await readSheet(file);
+      setFile(f);
+      const s = await readSheet(f, sheet);
       if (!s.rows.length) { setError('That file has no rows.'); return; }
       const auto: Record<string, string> = {};
       for (const f of fields) {
@@ -47,7 +49,7 @@ export function ImportWizard({ title, fields, options, help, onImport, onClose }
       }
       setMap(auto);
       setSheet(s);
-      setFileName(file.name);
+      setFileName(f.name);
     } catch (e) {
       setError(`Could not read that file: ${errorText(e)}`);
     }
@@ -98,7 +100,13 @@ export function ImportWizard({ title, fields, options, help, onImport, onClose }
       ) : (
         <div className="space-y-5">
           <div className="flex items-center justify-between rounded-xl bg-stone-50 px-4 py-3 text-sm">
-            <span><b>{fileName}</b> · {sheet.rows.length} rows</span>
+            <span className="flex flex-wrap items-center gap-2"><b>{fileName}</b> · {sheet.rows.length} rows
+              {sheet.sheets.length > 1 && (
+                <select value={sheet.sheet} onChange={(e) => file && pick(file, e.target.value)} className="rounded-lg border border-stone-300 px-2 py-1 text-sm" aria-label="Sheet">
+                  {sheet.sheets.map((n) => <option key={n} value={n}>Sheet: {n}</option>)}
+                </select>
+              )}
+            </span>
             <button className="text-royal-700 hover:underline" onClick={() => setSheet(null)}>Choose another file</button>
           </div>
 

@@ -20,7 +20,13 @@ npx firebase deploy --only firestore
 ```
 This uploads the **security rules** (who may see what) and the **indexes**. Until this is done, **anyone on the internet can read the church database**, and some pages may show empty lists.
 
-## 3. Turn on file storage (for voice notes and video prayer requests)
+## 3. Voice notes and videos
+**Free option (recommended): Cloudinary.** No Blaze plan needed.
+1. Create a free account at https://cloudinary.com/users/register_free.
+2. Cloudinary → Settings → Upload → *Add upload preset* → Signing mode **Unsigned**, folder `togg-prayer`.
+3. In TOGG: *Payments & links → Voice notes & videos* → choose Cloudinary, then paste your **Cloud name** and **preset name**.
+
+**Or Firebase Storage** (needs the Blaze plan):
 1. Firebase console → **Build → Storage → Get started** (choose a location in Europe).
    Projects created after October 2024 need the **Blaze (pay-as-you-go)** plan for this; a church stays well inside the free allowance.
 2. Then run:

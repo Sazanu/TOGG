@@ -47,7 +47,7 @@ export default function Tithes() {
 
   // Tithers = active adults (and anyone who has paid, e.g. working teens)
   const register = useMemo(() => {
-    const base = members.filter((m) => m.status !== 'visitor' && (m.category === 'adult' || byMember.has(m.id)));
+    const base = members.filter((m) => (m.status === 'active' && m.category === 'adult') || byMember.has(m.id));
     const needle = q.trim().toLowerCase();
     return base.filter((m) => {
       const paid = (byMember.get(m.id)?.month ?? 0) > 0;
@@ -58,7 +58,7 @@ export default function Tithes() {
     });
   }, [members, byMember, q, filter]);
 
-  const eligible = members.filter((m) => m.status !== 'visitor' && m.category === 'adult').length;
+  const eligible = members.filter((m) => m.status === 'active' && m.category === 'adult').length;
   const monthTotal = monthTithes.reduce((t, g) => t + g.amount, 0);
   const tithers = new Set(monthTithes.filter((g) => g.memberId).map((g) => g.memberId)).size;
   const ytd = tithes.reduce((t, g) => t + g.amount, 0);

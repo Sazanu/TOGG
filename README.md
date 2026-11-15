@@ -30,6 +30,8 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 - **Online branch** for members who have travelled or live abroad, with their group link.
 - **Access control:** department heads see only their department's members, cell leaders only their cell, finance only money, and branch staff only their branch. **The Super Admin can switch off any area for any person.**
 - **Payments & links:** your MoMo number, online payment link and bank details, used on every public giving page.
+- **Members are split into Members, Visitors, Not active, and Everyone.** Import your official list with *"This is the current official membership list"* ticked, and anyone not on it moves to **Not active**. Their records are kept, and they become active again if they reappear on a later list.
+- **Free voice notes and videos:** Cloudinary's free plan (no card) can store prayer-request recordings instead of Firebase Storage. Set it up under *Payments & links → Voice notes & videos*.
 
 👉 **To put it online, follow [DEPLOY.md](DEPLOY.md).**
 

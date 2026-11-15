@@ -23,11 +23,36 @@ export function emptyMember(branchId: string): Draft {
   return {
     firstName: '', lastName: '', phone: '', email: '', gender: '', dob: '', category: 'adult', status: 'active',
     branchId, departmentIds: [], address: '', occupation: '', maritalStatus: '', joinedAt: today(), notes: '',
-    membershipNo: '', cellId: null, source: 'manual',
+    membershipNo: '', cellId: null, source: 'manual', title: '',
   };
 }
 
+const TITLE_RE = /^(rev|revd|mrs|mr|miss|ms|dr|ps|pastor|lady|elder|deacon|deaconess|bro|sis|evang|apostle|prophet|prophetess)\.?\s+/i;
+const STATUS_LABEL: Record<MemberStatus, string> = { active: 'Members', visitor: 'Visitors', inactive: 'Not active' };
+
+/** Old lists write status in many ways. */
+function readStatus(v: string): MemberStatus | null {
+  const s = (v || '').toLowerCase();
+  if (!s) return null;
+  if (/visit|guest|first/.test(s)) return 'visitor';
+  if (/in-?active|not|former|old|left|dormant|travel|no\b/.test(s)) return 'inactive';
+  return 'active';
+}
+function readMarital(v: string): string {
+  const s = (v || '').toLowerCase();
+  if (!s) return '';
+  if (s.startsWith('unmarr') || s.startsWith('single')) return 'Single';
+  if (s.startsWith('marr')) return 'Married';
+  if (s.startsWith('wid')) return 'Widowed';
+  if (s.startsWith('div') || s.startsWith('sep')) return 'Divorced';
+  return v;
+}
+const tidy = (s: string) => (s && s === s.toUpperCase() ? s.toLowerCase().replace(/(^|[\s\-'.(])(\p{L})/gu, (_m, a, b) => a + b.toUpperCase()) : s || '');
+
 const MEMBER_FIELDS: ImportField[] = [
+  { key: 'title', label: 'Title', aliases: ['title', 'salutation'] },
+  { key: 'status', label: 'Status', aliases: ['status', 'memberstatus', 'active', 'membership'] },
+  { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'remarks', 'comment', 'comments'] },
   { key: 'name', label: 'Full name', aliases: ['fullname', 'name', 'membername', 'names'] },
   { key: 'firstName', label: 'First name', aliases: ['firstname', 'othernames', 'givenname', 'forename'] },
   { key: 'lastName', label: 'Last name', aliases: ['lastname', 'surname', 'familyname'] },
@@ -56,7 +81,7 @@ export default function Members() {
 
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<'' | MemberCategory>('');
-  const [status, setStatus] = useState<'' | MemberStatus>('');
+  const [status, setStatus] = useState<'' | MemberStatus>('active');
   const [dept, setDept] = useState<string>(myDepts.length ? '__mine__' : '');
   const [cellF, setCellF] = useState('');
   const [editing, setEditing] = useState<Member | null>(null);
@@ -82,10 +107,12 @@ export default function Members() {
   }, [members, q, cat, status, dept, cellF, myDepts]);
 
   const counts = useMemo(() => ({
-    adult: members.filter((m) => m.category === 'adult').length,
-    teen: members.filter((m) => m.category === 'teen').length,
-    child: members.filter((m) => m.category === 'child').length,
+    adult: members.filter((m) => m.status === 'active' && m.category === 'adult').length,
+    teen: members.filter((m) => m.status === 'active' && m.category === 'teen').length,
+    child: members.filter((m) => m.status === 'active' && m.category === 'child').length,
+    active: members.filter((m) => m.status === 'active').length,
     visitors: members.filter((m) => m.status === 'visitor').length,
+    inactive: members.filter((m) => m.status === 'inactive').length,
   }), [members]);
 
   function exportXlsx() {
@@ -115,12 +142,24 @@ export default function Members() {
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Adults" value={counts.adult} />
-        <Stat label="Teens" value={counts.teen} />
-        <Stat label="Children" value={counts.child} />
+        <Stat label="Active members" value={counts.active} sub={`${counts.adult} adults · ${counts.teen} teens · ${counts.child} children`} />
         <Stat label="Visitors" value={counts.visitors} />
+        <Stat label="Not active / former" value={counts.inactive} sub="Kept, but outside the main membership" />
+        <Stat label="Everyone on record" value={members.length} />
       </div>
 
+      <div className="mb-3 flex gap-1 overflow-x-auto rounded-2xl border border-stone-200 bg-white p-1">
+        {(['active', 'visitor', 'inactive', ''] as const).map((s) => (
+          <button key={s || 'all'} onClick={() => setStatus(s)} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-medium ${status === s ? 'bg-royal-800 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>
+            {s ? STATUS_LABEL[s] : 'Everyone'} <span className="opacity-60">({s === 'active' ? counts.active : s === 'visitor' ? counts.visitors : s === 'inactive' ? counts.inactive : members.length})</span>
+          </button>
+        ))}
+      </div>
+      {status === 'inactive' && (
+        <p className="mb-3 rounded-xl bg-stone-100 px-4 py-2 text-sm text-stone-600">
+          People who are no longer active — e.g. not on the latest official membership list. Their records are kept. Open someone and set Status to <b>Active</b> if they return.
+        </p>
+      )}
       <Card>
         <div className="flex flex-col gap-3 border-b border-stone-100 p-4 xl:flex-row">
           <div className="relative flex-1">
@@ -130,9 +169,6 @@ export default function Members() {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:flex">
             <Select value={cat} onChange={(e) => setCat(e.target.value as MemberCategory | '')} className="xl:w-32">
               <option value="">All ages</option><option value="adult">Adults</option><option value="teen">Teens</option><option value="child">Children</option>
-            </Select>
-            <Select value={status} onChange={(e) => setStatus(e.target.value as MemberStatus | '')} className="xl:w-32">
-              <option value="">All status</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="visitor">Visitor</option>
             </Select>
             <Select value={dept} onChange={(e) => setDept(e.target.value)} className="xl:w-48">
               <option value="">All departments</option>
@@ -174,7 +210,7 @@ export default function Members() {
                         <div className="flex items-center gap-3">
                           <Avatar text={initials(m.firstName, m.lastName)} />
                           <div>
-                            <Link to={`/members/${m.id}`} className="font-medium text-stone-900 hover:text-royal-700 hover:underline">{m.firstName} {m.lastName}</Link>
+                            <Link to={`/members/${m.id}`} className="font-medium text-stone-900 hover:text-royal-700 hover:underline">{m.title && <span className="text-stone-500">{m.title} </span>}{m.firstName} {m.lastName}</Link>
                             <div className="text-xs text-stone-500">
                               {m.membershipNo && <span className="mr-1 font-mono text-royal-600">{m.membershipNo}</span>}
                               {CATEGORY_LABEL[m.category]}{ageFrom(m.dob) !== null && ` · ${ageFrom(m.dob)} yrs`}
@@ -190,7 +226,7 @@ export default function Members() {
                           {m.cellId && <Badge color="blue">Cell: {cellName(m.cellId)}</Badge>}
                         </div>
                       </td>
-                      <td className="px-4 py-3"><Badge color={STATUS_COLOR[m.status]}>{m.status}</Badge></td>
+                      <td className="px-4 py-3"><Badge color={STATUS_COLOR[m.status]}>{m.status === 'inactive' ? 'not active' : m.status}</Badge></td>
                       <td className="px-4 py-3 text-stone-600">{prettyDate(m.joinedAt)}</td>
                       <td className="px-4 py-3 text-right">
                         {canEdit(m) && <button onClick={() => setEditing(m)} className="rounded-lg p-2 text-stone-400 hover:bg-stone-100 hover:text-royal-700" aria-label="Edit"><Pencil className="h-4 w-4" /></button>}
@@ -205,10 +241,10 @@ export default function Members() {
                 <li key={m.id}><Link to={`/members/${m.id}`} className="flex items-center gap-3 p-4">
                   <Avatar text={initials(m.firstName, m.lastName)} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-stone-900">{m.firstName} {m.lastName}</div>
+                    <div className="truncate font-medium text-stone-900">{m.title && `${m.title} `}{m.firstName} {m.lastName}</div>
                     <div className="truncate text-xs text-stone-500">{m.membershipNo ? `${m.membershipNo} · ` : ''}{m.phone || 'No phone'}{scope === ALL && ` · ${branchName(m.branchId)}`}</div>
                   </div>
-                  <Badge color={STATUS_COLOR[m.status]}>{m.status}</Badge>
+                  <Badge color={STATUS_COLOR[m.status]}>{m.status === 'inactive' ? 'not active' : m.status}</Badge>
                 </Link></li>
               ))}
             </ul>
@@ -308,6 +344,7 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="First name"><Input required value={d.firstName} onChange={(e) => set('firstName', e.target.value)} /></Field>
           <Field label="Last name"><Input required value={d.lastName} onChange={(e) => set('lastName', e.target.value)} /></Field>
+          <Field label="Title (optional)" hint="Rev., Mrs., Ps., Elder… SMS still greet them by first name."><Input value={d.title ?? ''} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Rev." /></Field>
           <Field label="Phone"><Input value={d.phone} onChange={(e) => set('phone', e.target.value)} placeholder="024 000 0000" /></Field>
           <Field label="Email"><Input type="email" value={d.email} onChange={(e) => set('email', e.target.value)} /></Field>
           <Field label="Gender">
@@ -323,7 +360,7 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
           </Field>
           <Field label="Status">
             <Select value={d.status} onChange={(e) => set('status', e.target.value as MemberStatus)}>
-              <option value="active">Active</option><option value="inactive">Inactive</option><option value="visitor">Visitor</option>
+              <option value="active">Active</option><option value="inactive">Not active</option><option value="visitor">Visitor</option>
             </Select>
           </Field>
           <Field label="Branch">
@@ -383,27 +420,44 @@ function MemberImport({ onClose }: { onClose: () => void }) {
   const [branchId, setBranchId] = useState(profile?.branchId ?? (scope !== ALL ? scope : ''));
   const [forceDept, setForceDept] = useState(isDeptHead && profile?.departmentIds.length ? profile.departmentIds[0] : '');
   const [skipDupes, setSkipDupes] = useState(true);
+  const [officialList, setOfficialList] = useState(false);
+  const canMark = can(profile?.role, 'members.write');
 
   async function run(rows: Record<string, string>[]) {
     if (!branchId) throw new Error('Choose the branch these members belong to.');
     const deptByName = new Map(departments.map((d) => [d.name.toLowerCase().replace(/[^a-z0-9]/g, ''), d.id]));
-    const havePhones = new Set(members.filter((m) => m.branchId === branchId && m.phone).map((m) => normalizePhone(m.phone)));
+    // Families sometimes share one phone, so a phone only means "duplicate" when the names also overlap.
+    const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 1));
+    const sameName = (a: string, b: string) => { const A = words(a); return [...words(b)].some((w) => A.has(w)); };
+    const havePhones = new Map<string, string[]>();
+    members.filter((m) => m.branchId === branchId && m.phone).forEach((m) => { const k = normalizePhone(m.phone); havePhones.set(k, [...(havePhones.get(k) ?? []), `${m.firstName} ${m.lastName}`]); });
     const haveNames = new Set(members.filter((m) => m.branchId === branchId).map((m) => `${m.firstName} ${m.lastName}`.toLowerCase().trim()));
     const notes: string[] = [];
     const ready: Draft[] = [];
     let skipped = 0;
+    const branchMembers = members.filter((m) => m.branchId === branchId);
+    const inFile = new Set<string>();
+    const onList = new Set<string>(); // existing members found in the file
+    const findExisting = (phone: string, key: string) => branchMembers.find((m) => (phone && normalizePhone(m.phone) === phone && sameName(`${m.firstName} ${m.lastName}`, key)) || `${m.firstName} ${m.lastName}`.toLowerCase().trim() === key);
     rows.forEach((r, i) => {
       let first = r.firstName; let last = r.lastName;
+      let title = (r.title || '').trim();
       if (!first && r.name) {
-        const parts = r.name.split(/\s+/).filter(Boolean);
+        let nm = r.name.replace(/\s+/g, ' ').trim();
+        for (let k = 0; k < 2; k++) { const t = nm.match(TITLE_RE); if (!t) break; title = `${title} ${t[0].trim()}`.trim(); nm = nm.slice(t[0].length); }
+        const parts = tidy(nm).split(/\s+/).filter(Boolean);
         first = parts[0] ?? ''; last = parts.slice(1).join(' ');
       }
+      first = tidy(first); last = tidy(last); title = tidy(title);
       if (!first) { skipped++; notes.push(`Row ${i + 2}: no name`); return; }
       const phone = r.phone ? normalizePhone(r.phone) : '';
       const key = `${first} ${last}`.toLowerCase().trim();
-      if (skipDupes && ((phone && havePhones.has(phone)) || haveNames.has(key))) { skipped++; notes.push(`Row ${i + 2}: ${first} ${last} already exists`); return; }
-      if (phone) havePhones.add(phone);
-      haveNames.add(key);
+      const existing = findExisting(phone, key);
+      if (existing) onList.add(existing.id);
+      // Compare with people ALREADY in the system (phone + similar name, or same full name);
+      // inside one file only an identical full name counts as a repeat (e.g. "Jnr" and his father are two people).
+      if (skipDupes && ((phone && (havePhones.get(phone) ?? []).some((n) => sameName(n, key))) || haveNames.has(key) || inFile.has(key))) { skipped++; notes.push(`Row ${i + 2}: ${first} ${last} already exists`); return; }
+      inFile.add(key);
       const g = (r.gender || '').toLowerCase();
       const c = (r.category || '').toLowerCase();
       const dob = parseDateLoose(r.dob);
@@ -413,9 +467,10 @@ function MemberImport({ onClose }: { onClose: () => void }) {
       let departmentIds = (r.departments || '').split(/[;,/]/).map((s) => deptByName.get(s.toLowerCase().replace(/[^a-z0-9]/g, ''))).filter((x): x is string => !!x);
       if (forceDept && !departmentIds.includes(forceDept)) departmentIds = [...departmentIds, forceDept];
       ready.push({
-        ...emptyMember(branchId), firstName: first, lastName: last, phone, email: r.email, gender: g.startsWith('m') ? 'male' : g.startsWith('f') ? 'female' : '',
-        dob, category, departmentIds, address: r.address, occupation: r.occupation, maritalStatus: r.maritalStatus,
+        ...emptyMember(branchId), firstName: first, lastName: last, title, phone, email: r.email, gender: g.startsWith('m') ? 'male' : g.startsWith('f') ? 'female' : '',
+        dob, category, departmentIds, address: tidy(r.address), occupation: tidy(r.occupation), maritalStatus: readMarital(r.maritalStatus),
         joinedAt: parseDateLoose(r.joinedAt) || today(), membershipNo: r.membershipNo, source: 'import',
+        status: readStatus(r.status) ?? 'active', notes: r.notes || '',
       });
     });
     ready.forEach((m) => { m.departmentIds = withAutoDepts(m, departments); });
@@ -427,6 +482,26 @@ function MemberImport({ onClose }: { onClose: () => void }) {
       const batch = writeBatch(db);
       ready.slice(i, i + 400).forEach((m) => batch.set(doc(collection(db, 'members')), { ...m, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
       await batch.commit();
+    }
+    // Official list: whoever in this branch is NOT on it becomes "not active"; whoever is on it is active again.
+    // Safety: never mark people "not active" from a file in which nobody could be recognised.
+    if (officialList && ready.length + onList.size === 0) {
+      notes.unshift('Nobody in this file was recognised, so no one was moved to "Not active". Check the sheet and the column matching.');
+    } else if (officialList) {
+      const stamp = today();
+      const changes = branchMembers.flatMap((m): { m: Member; status: MemberStatus; note: string }[] => {
+        if (onList.has(m.id) && m.status === 'inactive') return [{ m, status: 'active', note: `Back on the official membership list (${stamp}).` }];
+        if (!onList.has(m.id) && m.status === 'active') return [{ m, status: 'inactive', note: `Not on the official membership list imported ${stamp}.` }];
+        return [];
+      });
+      for (let i = 0; i < changes.length; i += 400) {
+        const batch = writeBatch(db);
+        changes.slice(i, i + 400).forEach(({ m, status, note }) => { batch.update(doc(db, 'members', m.id), { status, notes: [m.notes, note].filter(Boolean).join('\n'), updatedAt: serverTimestamp() }); });
+        await batch.commit();
+      }
+      const off = changes.filter((c) => c.status === 'inactive').length;
+      const back = changes.length - off;
+      notes.unshift(`${off} member(s) not on this list were moved to "Not active"${back ? `; ${back} returned to active` : ''}.`);
     }
     return { added: ready.length, skipped, notes };
   }
@@ -458,6 +533,12 @@ function MemberImport({ onClose }: { onClose: () => void }) {
             <input type="checkbox" checked={skipDupes} onChange={(e) => setSkipDupes(e.target.checked)} className="rounded border-stone-300" />
             Skip people already registered (same phone number or same name)
           </label>
+          {canMark && (
+            <label className="flex items-start gap-2 rounded-lg bg-gold-50 p-3 text-sm text-stone-700 sm:col-span-2">
+              <input type="checkbox" checked={officialList} onChange={(e) => setOfficialList(e.target.checked)} className="mt-0.5 rounded border-stone-300" />
+              <span><b>This is the current official membership list.</b> Anyone in this branch who is NOT in the file is moved to “Not active” (their records are kept), and anyone in the file who was not active becomes active again.</span>
+            </label>
+          )}
         </div>
       }
     />
