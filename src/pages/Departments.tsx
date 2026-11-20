@@ -6,7 +6,7 @@ import { Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Textarea,
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
-import { can } from '../lib/roles';
+import { can, isGlobal } from '../lib/roles';
 import type { Department } from '../lib/types';
 
 export const MAIN_DEPARTMENTS: { name: string; autoRule?: 'single' | 'married'; kind?: 'charity'; description?: string }[] = [
@@ -23,7 +23,7 @@ export default function Departments() {
   const { departments, deptTree, members, scope, branchName, deptWithChildren } = useData();
   const toast = useToast();
   const manage = can(profile?.role, 'departments.manage');
-  const mine = profile?.role === 'dept_leader' ? profile.departmentIds : null;
+  const mine = isGlobal(profile?.role) || ['branch_pastor', 'secretary'].includes(profile?.role ?? '') ? null : profile?.departmentIds ?? [];
   const [editing, setEditing] = useState<Department | null>(null);
   const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
   const [seeding, setSeeding] = useState(false);

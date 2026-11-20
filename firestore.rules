@@ -40,8 +40,9 @@ service cloud.firestore {
     function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('members'); }
     function canCells(b)        { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('cells'); }
     function canSms(b)          { return (isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary']))) && allowed('sms'); }
-    function myCell(b, cellId)  { return roleIn('cell_leader', b) && allowed('cells') && cellId in myCells(); }
-    function myDeptMember(d)    { return roleIn('dept_leader', d.branchId) && allowed('members') && d.departmentIds.hasAny(myDepts()); }
+    // Leading a cell or a department gives access to it whatever the person's main role is (no conflicts).
+    function myCell(b, cellId)  { return activeUser() && me().branchId == b && allowed('cells') && cellId in myCells(); }
+    function myDeptMember(d)    { return activeUser() && me().branchId == d.branchId && allowed('members') && d.departmentIds.hasAny(myDepts()); }
 
     function validRole(r) {
       return r in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'finance', 'usher', 'dept_leader', 'cell_leader', 'pending'];
@@ -61,10 +62,14 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     // Membership / tithe card numbers (TOGG-0001…). Can only go up.
+    // Written by the SMS server (Apps Script or Cloud Functions) every few minutes.
+    match /meta/heartbeat {
+      allow read: if activeUser();
+    }
     match /meta/counters {
       allow read: if activeUser();
       allow create, update: if activeUser()
-        && me().role in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary', 'dept_leader']
+        && (me().role in ['head_pastor', 'associate_pastor', 'branch_pastor', 'secretary'] || myDepts().size() > 0)
         && request.resource.data.keys().hasOnly(['memberSeq'])
         && request.resource.data.memberSeq is int
         && request.resource.data.memberSeq > (resource == null ? 0 : resource.data.memberSeq)
@@ -136,7 +141,7 @@ service cloud.firestore {
         && before.toSet().difference(after.toSet()).hasOnly(myDepts().toSet());
     }
     function cellIsMine(cellId) {
-      return cellId is string && me().role == 'cell_leader' && allowed('cells') && cellId in myCells();
+      return cellId is string && allowed('cells') && cellId in myCells();
     }
 
     match /members/{id} {
@@ -200,6 +205,14 @@ service cloud.firestore {
       allow delete: if canGiving(resource.data.branchId);
     }
 
+    // ---------- service collections (money counted at each service) ----------
+    match /collections/{id} {
+      allow read: if canGiving(resource.data.branchId);
+      allow create: if canGiving(request.resource.data.branchId) && request.resource.data.date is string && request.resource.data.lines is map;
+      allow update: if canGiving(resource.data.branchId) && canGiving(request.resource.data.branchId);
+      allow delete: if canGiving(resource.data.branchId);
+    }
+
     // ---------- cells ----------
     // Cells stand on their own (not under a department). Names are public for the prayer form.
     match /cells/{id} {
@@ -207,6 +220,17 @@ service cloud.firestore {
       allow create: if canCells(request.resource.data.branchId) && request.resource.data.name is string;
       allow update: if canCells(resource.data.branchId) && canCells(request.resource.data.branchId);
       allow delete: if canCells(resource.data.branchId);
+    }
+
+    // Cell leaders' log book, one per cell per month. id = {cellId}_{YYYY-MM}
+    match /cellLogs/{id} {
+      function cellOf() { return id.split('_')[0]; }
+      function branchOf() { return cellData(cellOf()).branchId; }
+      function okLog(d) { return d.cellId == cellOf() && d.month == id.split('_')[1] && d.branchId == branchOf() && d.rows is list && d.meetings is list; }
+      allow get: if canCells(branchOf()) || myCell(branchOf(), cellOf());
+      allow list: if canCells(resource.data.branchId) || myCell(resource.data.branchId, resource.data.cellId);
+      allow create, update: if (canCells(branchOf()) || myCell(branchOf(), cellOf())) && okLog(request.resource.data);
+      allow delete: if canCells(branchOf());
     }
 
     match /cellReports/{id} {
@@ -227,7 +251,7 @@ service cloud.firestore {
     match /deptReports/{id} {
       function part(i) { return id.split('_')[i]; }
       function isAuthor() {
-        return allowed('departments') && (isGlobal() || (roleIn('dept_leader', part(1)) && part(0) in myDepts()));
+        return activeUser() && allowed('departments') && (isGlobal() || (me().branchId == part(1) && part(0) in myDepts()));
       }
       function isReviewer() { return allowed('departments') && (isGlobal() || roleIn('branch_pastor', part(1))); }
       function matchesId(d) {
@@ -287,6 +311,14 @@ service cloud.firestore {
       allow write: if isGlobal();
     }
 
+    // ---------- personal reminders (everyone, only their own) ----------
+    match /reminders/{id} {
+      allow read, update, delete: if activeUser() && resource.data.ownerUid == request.auth.uid
+        && (request.method != 'update' || request.resource.data.ownerUid == request.auth.uid);
+      allow create: if activeUser() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.title is string && request.resource.data.remindAt is string;
+    }
+
     // ---------- Head Pastor's private assessments and reminders ----------
     match /pastorNotes/{id} {
       allow read, write: if isHead();
@@ -305,7 +337,7 @@ service cloud.firestore {
     // ---------- Charity Foundation ----------
     function canCharity() {
       return activeUser() && allowed('charity') && (isGlobal()
-        || (me().role == 'dept_leader'
+        || (myDepts().size() > 0
             && exists(/databases/$(database)/documents/settings/charity)
             && get(/databases/$(database)/documents/settings/charity).data.departmentId in myDepts()));
     }
@@ -322,8 +354,8 @@ service cloud.firestore {
         || (d.toLevel in ['branch_pastor', 'dept_leader', 'cell_leader'] && allowed('prayer')
             && (isGlobal() || roleIn('branch_pastor', d.branchId)))
         || (d.toLevel in ['dept_leader', 'cell_leader'] && roleIn('secretary', d.branchId) && allowed('prayer'))
-        || (d.toLevel == 'dept_leader' && roleIn('dept_leader', d.branchId) && allowed('prayer') && d.departmentId in myDepts())
-        || (d.toLevel == 'cell_leader' && roleIn('cell_leader', d.branchId) && allowed('prayer') && d.cellId in myCells());
+        || (d.toLevel == 'dept_leader' && activeUser() && me().branchId == d.branchId && allowed('prayer') && d.departmentId in myDepts())
+        || (d.toLevel == 'cell_leader' && activeUser() && me().branchId == d.branchId && allowed('prayer') && d.cellId in myCells());
     }
     match /prayerRequests/{id} {
       allow create: if request.resource.data.keys().hasOnly(['kind', 'name', 'phone', 'phoneKey', 'branchId', 'toLevel', 'departmentId', 'cellId', 'text', 'mediaPath', 'mediaUrl', 'mediaType', 'confidential', 'status', 'answerNote', 'memberId', 'createdAt'])

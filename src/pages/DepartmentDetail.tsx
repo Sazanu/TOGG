@@ -22,7 +22,7 @@ export default function DepartmentDetail() {
   const [syncing, setSyncing] = useState(false);
   const dept = departments.find((d) => d.id === id);
   const manage = can(profile?.role, 'departments.manage');
-  const isHead = profile?.role === 'dept_leader' && profile.departmentIds.includes(id);
+  const isHead = !!profile?.departmentIds?.includes(id);
   const canAdd = can(profile?.role, 'members.write') || isHead;
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);

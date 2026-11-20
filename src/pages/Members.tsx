@@ -73,7 +73,7 @@ export default function Members() {
   const { profile } = useAuth();
   const { members, membersLoading, branches, deptTree, cells, scope, branchName, deptName, cellName } = useData();
   const role = profile?.role;
-  const isDeptHead = role === 'dept_leader';
+  const isDeptHead = !can(role, 'members.write') && (profile?.departmentIds?.length ?? 0) > 0;
   const myDepts = useMemo(() => (isDeptHead ? profile?.departmentIds ?? [] : []), [isDeptHead, profile?.departmentIds]);
   const fullWrite = can(role, 'members.write');
   const canAdd = can(role, 'members.add');
@@ -289,7 +289,7 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
   const { profile } = useAuth();
   const { branches, cells, departments } = useData();
   const toast = useToast();
-  const isDeptHead = profile?.role === 'dept_leader';
+  const isDeptHead = !can(profile?.role, 'members.write') && (profile?.departmentIds?.length ?? 0) > 0;
   const fullWrite = can(profile?.role, 'members.write');
   const [d, setD] = useState<Draft>(() => {
     if (!member) return { ...emptyMember(defaultBranch), cellId: presetCell ?? null, departmentIds: presetDept ? [presetDept] : isDeptHead && profile?.departmentIds?.length === 1 ? [...profile.departmentIds] : [] };
@@ -416,7 +416,7 @@ export function MemberForm({ member, defaultBranch, lockBranch, onClose, presetD
 function MemberImport({ onClose }: { onClose: () => void }) {
   const { profile } = useAuth();
   const { branches, members, departments, deptTree, scope } = useData();
-  const isDeptHead = profile?.role === 'dept_leader';
+  const isDeptHead = !can(profile?.role, 'members.write') && (profile?.departmentIds?.length ?? 0) > 0;
   const [branchId, setBranchId] = useState(profile?.branchId ?? (scope !== ALL ? scope : ''));
   const [forceDept, setForceDept] = useState(isDeptHead && profile?.departmentIds.length ? profile.departmentIds[0] : '');
   const [skipDupes, setSkipDupes] = useState(true);

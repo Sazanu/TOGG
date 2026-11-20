@@ -43,6 +43,8 @@ export interface Department {
   autoRule?: 'single' | 'married' | null;
   /** 'charity' marks the Charity Foundation, which gets its own module. */
   kind?: 'charity' | null;
+  headMemberId?: string;
+  assistantMemberId?: string;
 }
 
 export type MemberCategory = 'adult' | 'teen' | 'child';
@@ -73,6 +75,8 @@ export interface Member {
   welfareExempt?: boolean;
   /** Rev., Mrs., Ps., Elder… (kept apart so SMS can still say "Dear Benjamin"). */
   title?: string;
+  /** Church positions held, e.g. Head Pastor, Associate Pastor, Elder (one person can hold several). */
+  positions?: string[];
 }
 
 export interface Service {
@@ -138,6 +142,7 @@ export interface Cell {
   departmentId?: string;
   leaderName: string;
   leaderPhone: string;
+  leaderMemberId?: string;
   location: string;
   meetingDay: string;
   meetingTime: string;
@@ -219,6 +224,8 @@ export interface SmsMessage {
   sentCount?: number;
   failedCount?: number;
   error?: string;
+  /** What the SMS company answered (shown so you can confirm delivery). */
+  providerResponse?: string;
   createdByName?: string;
   createdAt?: { toDate(): Date } | null;
 }
@@ -238,7 +245,9 @@ export interface Programme {
 }
 
 export interface SmsSettings {
-  provider: 'arkesel' | 'hubtel' | 'mnotify' | 'log';
+  provider: 'gonlinesites' | 'arkesel' | 'hubtel' | 'mnotify' | 'log';
+  /** Web-app URL of the free Google Apps Script SMS server (sms-server/). */
+  relayUrl?: string;
   senderId: string;
   absenteeEnabled: boolean;
   absenteeTemplate: string;
@@ -341,4 +350,52 @@ export interface WelfareSettings {
   remindEnabled: boolean;
   remindDay: number; // day of month
   template: string;
+}
+
+/** Money counted at one church service (a collection — not individual giving). */
+export interface Collection {
+  id: string;
+  branchId: string;
+  date: string;
+  serviceType: string;
+  title: string;
+  lines: Record<string, number>;
+  expenses: { item: string; amount: number }[];
+  countedBy: string;
+  notes: string;
+}
+
+/** Status on the cell leaders' log book: Church Member, Unestablished Convert, Established Convert. */
+export type CellPersonStatus = 'CM' | 'UCV' | 'ECV';
+export interface CellLogRow {
+  memberId: string;
+  name: string;
+  phone: string;
+  status: CellPersonStatus;
+  cell: boolean[];    // weeks 1-5
+  sunday: boolean[];  // weeks 1-5
+  weekday: boolean[]; // weeks 1-5
+}
+export interface CellMeetingWeek { date: string; attendance: number; offering: number }
+/** One month of the cell leaders' log book (TOGG paper form). id = {cellId}_{YYYY-MM} */
+export interface CellLog {
+  id: string;
+  cellId: string;
+  branchId: string;
+  month: string;
+  leaderName: string;
+  rows: CellLogRow[];
+  meetings: CellMeetingWeek[]; // WK1-WK5
+  updatedByName?: string;
+}
+
+/** A personal reminder: shown in the bell (with a sound) for the person who set it. */
+export interface Reminder {
+  id: string;
+  ownerUid: string;
+  title: string;
+  note: string;
+  remindAt: string; // YYYY-MM-DDTHH:mm (Ghana time)
+  link: string;
+  done: boolean;
 }

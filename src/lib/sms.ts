@@ -1,4 +1,4 @@
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from './firebase';
 import type { Audience, Member, SmsSettings } from './types';
@@ -64,10 +64,32 @@ export async function queueSms(data: {
     createdBy: data.createdBy ?? null, createdByName: data.createdByName ?? '', createdAt: serverTimestamp(),
   });
   if (scheduled) return { id: ref.id, delivered: false };
+  return wakeSmsServer(ref.id);
+}
+
+/**
+ * Asks the SMS server to send what is waiting.
+ *  - Free Google Apps Script server: its web-app address is saved in settings/sms.relayUrl.
+ *  - Otherwise Firebase Cloud Functions (Blaze plan).
+ */
+export async function wakeSmsServer(id?: string): Promise<{ id: string; delivered: boolean; via?: string; error?: string }> {
+  let relayUrl = '';
+  try { relayUrl = String((await getDoc(doc(db, 'settings', 'sms'))).data()?.relayUrl ?? ''); } catch { /* ignore */ }
+  if (relayUrl) {
+    try {
+      // The Apps Script answers from another site, so the reply is not readable here;
+      // the message's status in "Sent & scheduled" shows the result a few seconds later.
+      await fetch(relayUrl, { method: 'POST', mode: 'no-cors', body: 'run' });
+      return { id: id ?? '', delivered: true, via: 'apps-script' };
+    } catch (e) {
+      return { id: id ?? '', delivered: false, via: 'apps-script', error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  if (!id) return { id: '', delivered: false, error: 'No SMS server is set up.' };
   try {
-    await httpsCallable(functions, 'sendSmsNow')({ id: ref.id });
-    return { id: ref.id, delivered: true };
+    await httpsCallable(functions, 'sendSmsNow')({ id });
+    return { id, delivered: true, via: 'cloud-functions' };
   } catch (e) {
-    return { id: ref.id, delivered: false, error: e instanceof Error ? e.message : String(e) };
+    return { id, delivered: false, via: 'cloud-functions', error: e instanceof Error ? e.message : String(e) };
   }
 }

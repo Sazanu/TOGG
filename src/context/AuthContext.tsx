@@ -11,7 +11,7 @@ import {
 import { doc, getDoc, onSnapshot, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { AppUser } from '../lib/types';
-import { setRevokedAreas } from '../lib/roles';
+import { setRevokedAreas, setUserExtras } from '../lib/roles';
 
 interface AuthState {
   user: User | null;
@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (snap) => {
         const p = snap.exists() ? ({ uid: snap.id, ...snap.data() } as AppUser) : null;
         setRevokedAreas(p?.revoked);
+        setUserExtras(p && p.active ? p : null);
         setProfile(p);
         setLoading(false);
       },

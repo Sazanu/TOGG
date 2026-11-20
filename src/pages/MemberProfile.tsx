@@ -12,6 +12,7 @@ import { can } from '../lib/roles';
 import { usePrayerRequests, PrayerCard } from './Prayer';
 import type { Assessment, Gift, Member, PastorNote, Service } from '../lib/types';
 import { MemberForm } from './Members';
+import { MemberRoles } from './Leadership';
 
 export default function MemberProfile() {
   const { id = '' } = useParams();
@@ -20,7 +21,7 @@ export default function MemberProfile() {
   const role = profile?.role;
   const m = memberById.get(id);
   const [editing, setEditing] = useState(false);
-  const canEdit = !!m && (can(role, 'members.write') || (role === 'dept_leader' && m.departmentIds.some((d) => profile?.departmentIds.includes(d))));
+  const canEdit = !!m && (can(role, 'members.write') || (m.departmentIds.some((d) => profile?.departmentIds?.includes(d)) ?? false));
 
   if (membersLoading) return <Spinner />;
   if (!m) return <Empty title="Member not found">They may be in a branch you cannot see. <Link to="/members" className="text-royal-700 underline">Back to members</Link></Empty>;
@@ -53,6 +54,7 @@ export default function MemberProfile() {
         <dl className="grid gap-x-6 gap-y-3 p-6 text-sm sm:grid-cols-2 lg:grid-cols-5">
           {facts.map(([k, v]) => <div key={k}><dt className="text-xs text-stone-500">{k}</dt><dd className="font-medium text-stone-800">{v}</dd></div>)}
         </dl>
+        <div className="border-t border-stone-100 px-6 pt-4"><MemberRoles m={m} /></div>
         <div className="flex flex-wrap gap-2 border-t border-stone-100 px-6 py-4">
           {m.departmentIds.length === 0 && !m.cellId && <span className="text-sm text-stone-400">Not in a department or cell yet.</span>}
           {m.departmentIds.map((d) => <Link key={d} to={`/departments/${d}`}><Badge color="royal">{deptName(d)}</Badge></Link>)}

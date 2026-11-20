@@ -196,7 +196,7 @@ export async function deliver(provider: Provider, recipients: Recipient[], templ
     const text = fillTemplate(template, { firstName: r.firstName || 'friend', name: r.name || 'friend', church, ...(r.vars ?? {}) });
     groups.set(text, [...(groups.get(text) ?? []), r.phone]);
   }
-  let sent = 0; let failed = 0; let error = '';
+  let sent = 0; let failed = 0; let error = ''; let response = '';
   for (const [text, phones] of groups) {
     for (let i = 0; i < phones.length; i += 100) {
       const chunk = phones.slice(i, i + 100);
@@ -204,12 +204,13 @@ export async function deliver(provider: Provider, recipients: Recipient[], templ
         const res = await provider.send(chunk, text);
         sent += res.sent; failed += res.failed;
         if (res.error) error = res.error;
+        if (res.response) response = res.response;
       } catch (e) {
         failed += chunk.length; error = e instanceof Error ? e.message : String(e);
       }
     }
   }
-  return { sent, failed, error };
+  return { sent, failed, error, response };
 }
 
 /** Claims and sends one message from smsMessages. Safe to call twice: only one call will send. */
@@ -237,6 +238,7 @@ export async function processMessage(db: Firestore, id: string, now = new Date()
     await ref.update({
       status: res.sent > 0 ? 'sent' : 'failed', provider: provider.name, recipientsCount: recipients.length,
       sentCount: res.sent, failedCount: res.failed, error: res.error || FieldValue.delete(), finishedAt: FieldValue.serverTimestamp(),
+      ...(res.response ? { providerResponse: res.response } : {}),
     });
     return res;
   } catch (e) {
@@ -308,5 +310,6 @@ export async function runTick(db: Firestore, now = new Date(), providerOverride?
   const queued = await db.collection('smsMessages').where('status', '==', 'queued').get();
   const ids = new Set([...created, ...due.docs.map((d) => d.id), ...queued.docs.map((d) => d.id)]);
   for (const id of ids) await processMessage(db, id, now, providerOverride);
+  await db.doc('meta/heartbeat').set({ at: FieldValue.serverTimestamp(), via: 'cloud-functions', provider: settings.provider, ok: true }, { merge: true });
   return { processed: ids.size, created: created.length };
 }

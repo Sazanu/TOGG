@@ -115,13 +115,24 @@ export function areasForRole(role: Role): Area[] {
 
 // Areas switched off for the signed-in user (set by AuthContext from their profile).
 let revoked = new Set<string>();
+// Extra access from what the person LEADS (departments / cells), whatever their main role is.
+// One person can be a pastor, a department head and a cell leader at the same time.
+let extras = new Set<Capability>();
+const DEPT_CAPS: Capability[] = ['members.read', 'members.list', 'members.add', 'reports.view', 'departments.view', 'prayer.view'];
+const CELL_CAPS: Capability[] = ['members.read', 'cells.view', 'prayer.view'];
+export function setUserExtras(p: { departmentIds?: string[]; cellIds?: string[] } | null) {
+  extras = new Set<Capability>([...((p?.departmentIds?.length ?? 0) > 0 ? DEPT_CAPS : []), ...((p?.cellIds?.length ?? 0) > 0 ? CELL_CAPS : [])]);
+}
+/** Roles that already see a whole branch. */
+export const BRANCH_WIDE: Role[] = ['branch_pastor', 'secretary', 'finance', 'usher'];
 export function setRevokedAreas(list: string[] | undefined) { revoked = new Set(list ?? []); }
 export function areaAllowed(role: Role | undefined, area: Area): boolean {
   return role === 'head_pastor' || !revoked.has(area);
 }
 
 export function can(role: Role | undefined, cap: Capability): boolean {
-  if (!role || !MATRIX[role].includes(cap)) return false;
+  if (!role || role === 'pending') return false;
+  if (!MATRIX[role].includes(cap) && !extras.has(cap)) return false;
   const area = AREA_OF[cap];
   return !area || areaAllowed(role, area);
 }

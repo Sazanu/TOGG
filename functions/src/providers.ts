@@ -1,5 +1,7 @@
 /** SMS gateways used in Ghana. Each returns how many messages were accepted. */
-export interface SendResult { sent: number; failed: number; error?: string }
+export interface SendResult { sent: number; failed: number; error?: string; response?: string }
+/** Words in a Gonlinesites reply that mean the SMS was NOT sent. */
+export const GONLINE_ERROR = /error|invalid|insufficient|fail|denied|wrong|incorrect|not ?allowed|unauthori[sz]ed|low balance/i;
 export interface Provider { name: string; send(to: string[], text: string): Promise<SendResult> }
 
 export interface ProviderConfig { provider: string; senderId: string; apiKey: string }
@@ -36,6 +38,18 @@ export function makeProvider(cfg: ProviderConfig): Provider {
           });
           if (r.ok && (r.json?.status === 'success' || String(r.json?.code) === '2000')) return { sent: to.length, failed: 0 };
           return { sent: 0, failed: to.length, error: `mNotify ${r.status}: ${r.json?.message ?? r.text.slice(0, 200)}` };
+        },
+      };
+    case 'gonlinesites':
+      return {
+        name: 'gonlinesites',
+        async send(to, text) {
+          const q = `action=send-sms&api_key=${encodeURIComponent(cfg.apiKey)}&to=${encodeURIComponent(to.join(','))}&from=${encodeURIComponent(sender)}&sms=${encodeURIComponent(text)}`;
+          let res: Response;
+          try { res = await fetch(`https://sms.gonlinesites.com/app/sms/api?${q}`); } catch { res = await fetch(`http://sms.gonlinesites.com/app/sms/api?${q}`); }
+          const body = await res.text();
+          if (res.ok && !GONLINE_ERROR.test(body)) return { sent: to.length, failed: 0, response: body.slice(0, 300) };
+          return { sent: 0, failed: to.length, error: `Gonlinesites ${res.status}: ${body.slice(0, 200)}` };
         },
       };
     case 'hubtel': {

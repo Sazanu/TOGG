@@ -293,6 +293,48 @@ await t('other department heads cannot see charity records', () => assertFails(g
 await t('finance cannot see charity records', () => assertFails(getDoc(doc(db('finA'), 'charity/b1'))));
 await t('Head Pastor sees charity records', () => assertSucceeds(getDoc(doc(db('head'), 'charity/b1'))));
 
+console.log('One person, several roles (no conflicts)');
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const d = ctx.firestore();
+  // An usher who also leads cell c1 and heads Media — three roles in one account
+  await setDoc(doc(d, 'users/multi'), { ...base, role: 'usher', branchId: 'A', departmentIds: ['media'], cellIds: ['c1'], active: true });
+  await setDoc(doc(d, 'members/cellOnly'), { firstName: 'Cel', lastName: 'L', branchId: 'A', category: 'adult', status: 'active', departmentIds: [], cellId: 'c1' });
+});
+await t('usher + cell leader: reads own cell members', () => assertSucceeds(getDocs(query(collection(db('multi'), 'members'), where('branchId', '==', 'A'), where('cellId', '==', 'c1')))));
+await t('usher + cell leader: fills the cell log book', () => assertSucceeds(setDoc(doc(db('multi'), 'cellLogs/c1_2026-11'), { cellId: 'c1', branchId: 'A', month: '2026-11', rows: [], meetings: [] })));
+await t('usher + dept head: registers into Media', () => assertSucceeds(addDoc(collection(db('multi'), 'members'), dm())));
+await t('usher + dept head: submits the Media budget', () => assertSucceeds(setDoc(doc(db('multi'), 'deptReports', rid('media', 'A', 'plan')), dr('media', 'A', 'plan'))));
+await t('…but still cannot see money', () => assertFails(getDocs(query(collection(db('multi'), 'giving'), where('branchId', '==', 'A')))));
+await t('Super Admin gives an existing role extra cells/departments', () => assertSucceeds(updateDoc(doc(db('head'), 'users/secA'), { cellIds: ['c1'], departmentIds: ['media'] })));
+
+console.log('Cell log books');
+await t('cell leader opens a month that does not exist yet', () => assertSucceeds(getDoc(doc(db('cellLead'), 'cellLogs/c1_2026-10'))));
+await t('cell leader saves their log book', () => assertSucceeds(setDoc(doc(db('cellLead'), 'cellLogs/c1_2026-10'), { cellId: 'c1', branchId: 'A', month: '2026-10', rows: [{ name: 'Ama', status: 'CM' }], meetings: [{ date: '2026-10-07', attendance: 8, offering: 20 }] })));
+await t('…not for another cell', () => assertFails(setDoc(doc(db('cellLead'), 'cellLogs/c2_2026-10'), { cellId: 'c2', branchId: 'A', month: '2026-10', rows: [], meetings: [] })));
+await t('…and the id must match the content', () => assertFails(setDoc(doc(db('cellLead'), 'cellLogs/c1_2026-09'), { cellId: 'c1', branchId: 'A', month: '2026-10', rows: [], meetings: [] })));
+await t('branch administrator lists all log books for the month', () => assertSucceeds(getDocs(query(collection(db('secA'), 'cellLogs'), where('branchId', '==', 'A'), where('month', '==', '2026-10')))));
+await t('finance cannot read log books', () => assertFails(getDoc(doc(db('finA'), 'cellLogs/c1_2026-10'))));
+
+console.log('Service finance (collections)');
+const col = (o = {}) => ({ branchId: 'A', date: '2026-11-15', serviceType: 'Sunday Service', title: '', lines: { loveOffering: 500, tithe: 1200 }, expenses: [{ item: 'Fuel', amount: 100 }], countedBy: 'X', notes: '', ...o });
+await t('finance records a service collection', () => assertSucceeds(setDoc(doc(db('finA'), 'collections/s1'), col())));
+await t('branch pastor reads it', () => assertSucceeds(getDocs(query(collection(db('bpA'), 'collections'), where('branchId', '==', 'A')))));
+await t('finance cannot record for another branch', () => assertFails(setDoc(doc(db('finA'), 'collections/s2'), col({ branchId: 'B' }))));
+await t('secretary / usher cannot see collections', async () => { await assertFails(getDoc(doc(db('secA'), 'collections/s1'))); await assertFails(getDoc(doc(db('ushA'), 'collections/s1'))); });
+
+console.log('Personal reminders & SMS heartbeat');
+await t('anyone sets their own reminder', () => assertSucceeds(setDoc(doc(db('ushA'), 'reminders/r1'), { ownerUid: 'ushA', title: 'Call Ama', remindAt: '2026-11-20T09:00', done: false })));
+await t('…lists them', () => assertSucceeds(getDocs(query(collection(db('ushA'), 'reminders'), where('ownerUid', '==', 'ushA'), where('done', '==', false)))));
+await t("…nobody else can read them, not even the Head Pastor", async () => { await assertFails(getDoc(doc(db('head'), 'reminders/r1'))); await assertFails(getDoc(doc(db('bpA'), 'reminders/r1'))); });
+await t('cannot create a reminder for someone else', () => assertFails(setDoc(doc(db('ushA'), 'reminders/r2'), { ownerUid: 'bpA', title: 'x', remindAt: '2026-11-20T09:00', done: false })));
+await t('cannot hand a reminder to someone else', () => assertFails(updateDoc(doc(db('ushA'), 'reminders/r1'), { ownerUid: 'bpA' })));
+await t('staff can read the SMS server heartbeat; nobody can fake it', async () => {
+  await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'meta/heartbeat'), { at: new Date(), via: 'apps-script', ok: true }));
+  await assertSucceeds(getDoc(doc(db('bpA'), 'meta/heartbeat')));
+  await assertFails(setDoc(doc(db('head'), 'meta/heartbeat'), { ok: true }));
+  await assertFails(getDoc(doc(anon(), 'meta/heartbeat')));
+});
+
 console.log('First-admin recovery & old data');
 await env.withSecurityRulesDisabled(async (ctx) => {
   const d = ctx.firestore();

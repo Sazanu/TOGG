@@ -34,6 +34,9 @@ import Projects, { ProjectDetail, PublicProject } from './pages/Projects';
 import Charity, { PublicCharity, useCanCharity } from './pages/Charity';
 import Settings from './pages/Settings';
 import PublicPay from './pages/PublicPay';
+import Status from './pages/Status';
+import ServiceFinance from './pages/ServiceFinance';
+import Leadership from './pages/Leadership';
 
 function CharityGuard({ children }: { children: ReactNode }) {
   return useCanCharity() ? <>{children}</> : <Navigate to="/" replace />;
@@ -63,6 +66,9 @@ function Private() {
           <Route path="projects/:id" element={<Guard cap="giving.read"><ProjectDetail /></Guard>} />
           <Route path="charity" element={<CharityGuard><Charity /></CharityGuard>} />
           <Route path="settings" element={<Guard cap="data.manage"><Settings /></Guard>} />
+          <Route path="leadership" element={<Guard cap="members.list"><Leadership /></Guard>} />
+          <Route path="service-finance" element={<Guard cap="giving.read"><ServiceFinance /></Guard>} />
+          <Route path="status" element={<Guard cap="data.manage"><Status /></Guard>} />
           <Route path="attendance" element={<Guard cap="attendance.write"><Attendance /></Guard>} />
           <Route path="attendance/:serviceId" element={<Guard cap="attendance.write"><CheckIn /></Guard>} />
           <Route path="giving" element={<Guard cap="giving.read"><Giving /></Guard>} />

@@ -13,7 +13,8 @@
     "deploy": "npm run build && firebase deploy",
     "test:sms": "npm --prefix functions run build && firebase emulators:exec --only firestore --project demo-togg-fn \"node functions/test/core.test.mjs\"",
     "deploy:web": "npm run build && firebase deploy --only hosting,firestore",
-    "test:storage": "firebase emulators:exec --only firestore,storage --project demo-togg \"node tests/storage.test.mjs\""
+    "test:storage": "firebase emulators:exec --only firestore,storage --project demo-togg \"node tests/storage.test.mjs\"",
+    "test:sms-server": "firebase emulators:exec --only firestore --project demo-sms \"node sms-server/test/apps-script.test.cjs\""
   },
   "dependencies": {
     "firebase": "^11.10.0",

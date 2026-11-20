@@ -30,13 +30,16 @@ export function usePrayerRequests() {
     else if (role === 'associate_pastor') PRAYER_LEVELS.filter((l) => l.value !== 'head_pastor').forEach((l) => qs.push(query(base, where('toLevel', '==', l.value))));
     else if (role === 'branch_pastor') (['cell_leader', 'dept_leader', 'branch_pastor'] as const).forEach((l) => qs.push(query(base, where('toLevel', '==', l), where('branchId', '==', b))));
     else if (role === 'secretary') (['cell_leader', 'dept_leader'] as const).forEach((l) => qs.push(query(base, where('toLevel', '==', l), where('branchId', '==', b))));
-    else if (role === 'dept_leader') (profile.departmentIds ?? []).forEach((d) => qs.push(query(base, where('toLevel', '==', 'dept_leader'), where('branchId', '==', b), where('departmentId', '==', d))));
-    else if (role === 'cell_leader') (profile.cellIds ?? []).forEach((c) => qs.push(query(base, where('toLevel', '==', 'cell_leader'), where('branchId', '==', b), where('cellId', '==', c))));
+    // Plus requests sent to the departments / cells this person leads (any role).
+    if (!isGlobal(role) && role !== 'branch_pastor') {
+      (profile.departmentIds ?? []).forEach((d) => qs.push(query(base, where('toLevel', '==', 'dept_leader'), where('branchId', '==', b), where('departmentId', '==', d))));
+      if (role !== 'secretary') (profile.cellIds ?? []).forEach((c) => qs.push(query(base, where('toLevel', '==', 'cell_leader'), where('branchId', '==', b), where('cellId', '==', c))));
+    }
     if (!qs.length) { setRequests([]); setLoading(false); return; }
     const parts = new Map<number, PrayerRequest[]>();
     const unsubs = qs.map((q, i) => onSnapshot(q, (s) => {
       parts.set(i, s.docs.map((d) => ({ id: d.id, ...d.data() }) as PrayerRequest));
-      const all = [...parts.values()].flat();
+      const all = [...new Map([...parts.values()].flat().map((r) => [r.id, r])).values()];
       all.sort((x, y) => (y.createdAt?.toDate().getTime() ?? Date.now()) - (x.createdAt?.toDate().getTime() ?? Date.now()));
       setRequests(all);
       if (parts.size === qs.length) setLoading(false);

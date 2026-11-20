@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import { collection, doc, onSnapshot, orderBy, query, where, type Query, type QueryDocumentSnapshot, type DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Branch, Cell, Department, Member } from '../lib/types';
-import { can, isGlobal } from '../lib/roles';
+import { BRANCH_WIDE, can, isGlobal } from '../lib/roles';
 import { isoDate } from '../lib/format';
 import { useAuth } from './AuthContext';
 
@@ -34,7 +34,7 @@ function normalizeMember(id: string, d: Record<string, unknown>): Member {
     branchId: str(d.branchId), departmentIds: Array.isArray(d.departmentIds) ? (d.departmentIds as string[]) : [],
     address: str(d.address ?? d.location), occupation: str(d.occupation), maritalStatus: str(d.maritalStatus),
     joinedAt: dateStr(d.joinedAt ?? d.dateAdded), notes: str(d.notes),
-    membershipNo: str(d.membershipNo), title: str(d.title), cellId: (d.cellId as string | null) ?? null, source: str(d.source) || (d.name && !d.firstName ? 'old-form' : ''),
+    membershipNo: str(d.membershipNo), title: str(d.title), positions: Array.isArray(d.positions) ? (d.positions as string[]) : [], cellId: (d.cellId as string | null) ?? null, source: str(d.source) || (d.name && !d.firstName ? 'old-form' : ''),
   };
 }
 
@@ -104,8 +104,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!profile?.active || !can(profile.role, 'cells.view')) { setCells([]); return; }
     const sorted = (l: Cell[]) => [...l].sort((a, b) => a.name.localeCompare(b.name));
-    if (profile.role === 'cell_leader') {
-      // Cell leaders only ever load their own cells.
+    if (!isGlobal(profile.role) && !can(profile.role, 'cells.manage')) {
+      // People who only LEAD cells load just their own cells.
       const found = new Map<string, Cell>();
       const unsubs = (profile.cellIds ?? []).map((id) => onSnapshot(doc(db, 'cells', id), (d: DocumentSnapshot) => {
         if (d.exists()) found.set(d.id, { id: d.id, ...d.data() } as Cell); else found.delete(d.id);
@@ -129,14 +129,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const base = collection(db, 'members');
     // Each role only loads what it may see (the database rules enforce the same).
     let queries: Query[];
-    if (profile.role === 'dept_leader') {
+    if (isGlobal(profile.role) || BRANCH_WIDE.includes(profile.role)) {
+      queries = [scope === ALL ? base : query(base, where('branchId', '==', scope))];
+    } else {
+      // Only the people in the departments / cells this person leads.
       const d = profile.departmentIds ?? [];
       queries = [];
       for (let i = 0; i < d.length; i += 30) queries.push(query(base, where('branchId', '==', scope), where('departmentIds', 'array-contains-any', d.slice(i, i + 30))));
-    } else if (profile.role === 'cell_leader') {
-      queries = (profile.cellIds ?? []).map((c) => query(base, where('branchId', '==', scope), where('cellId', '==', c)));
-    } else {
-      queries = [scope === ALL ? base : query(base, where('branchId', '==', scope))];
+      (profile.cellIds ?? []).forEach((c) => queries.push(query(base, where('branchId', '==', scope), where('cellId', '==', c))));
     }
     if (!queries.length) { setMembers([]); setMembersLoading(false); return; }
     const parts = new Map<number, QueryDocumentSnapshot[]>();

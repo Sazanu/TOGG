@@ -32,7 +32,7 @@ export default function Dashboard() {
   const { members: allMembers, branches, departments, scope, branchName } = useData();
   const role = profile?.role;
   // Department heads see their own departments' people.
-  const members = role === 'dept_leader' ? allMembers.filter((m) => m.departmentIds?.some((d) => profile?.departmentIds.includes(d))) : allMembers;
+  const members = allMembers; // already limited to what this person may see
   const TITLES = /^(rev|revd|pastor|ps|apostle|bishop|prophet|evangelist|elder|deacon|deaconess|dr|mr|mrs|ms|miss|bro|sis|brother|sister)\.?$/i;
   const first = (profile?.displayName ?? '').split(/\s+/).find((w) => w && !TITLES.test(w)) ?? profile?.displayName ?? '';
 
@@ -237,7 +237,7 @@ function ReportsWidget() {
   const { profile } = useAuth();
   const { scope, departments } = useData();
   const month = monthKey();
-  const isHead = profile?.role === 'dept_leader';
+  const isHead = !can(profile?.role, 'reports.review') && (profile?.departmentIds?.length ?? 0) > 0;
   const branch = profile?.branchId ?? scope;
   const reports = useMonthReports(month, branch, isHead ? profile?.departmentIds ?? [] : null) ?? [];
   const by = (st: string) => reports.filter((r) => r.status === st).length;

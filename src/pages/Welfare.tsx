@@ -48,7 +48,7 @@ export default function Welfare() {
     setSending(true);
     try {
       const r = await queueSms({ branchId, message: settings.template, audience: { type: 'welfare_defaulters', branchId }, label: `Welfare reminder ${monthShort(now)}`, createdBy: profile?.uid, createdByName: profile?.displayName });
-      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Reminders sent. See SMS messages → Sent.' : 'Saved, but the SMS service did not respond. It will retry when it is running.');
+      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Reminders sent. See SMS messages → Sent.' : 'Saved, but no SMS server answered. See System status.');
     } catch (e) { toast('err', errorText(e)); } finally { setSending(false); }
   }
 

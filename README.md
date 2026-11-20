@@ -33,6 +33,13 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 - **Members are split into Members, Visitors, Not active, and Everyone.** Import your official list with *"This is the current official membership list"* ticked, and anyone not on it moves to **Not active**. Their records are kept, and they become active again if they reappear on a later list.
 - **Free voice notes and videos:** Cloudinary's free plan (no card) can store prayer-request recordings instead of Firebase Storage. Set it up under *Payments & links → Voice notes & videos*.
 
+### Latest additions
+- **Free SMS server** (Google Apps Script, no Blaze plan) with **Gonlinesites**, Arkesel, mNotify or Hubtel. A **System status** page shows green or red for security, SMS, settings and church data, and has a button to send any stuck messages.
+- **Service finance:** each service's collections (love offering, kingdom offering, offering, seed and special seed, projects offering, tithe, pledges) and expenses. Weekly or monthly report with **Service, Offering, Seed, Tithe, Projects, Pledges, Total, Expenses, 30%, Balance**. The 30% rate and what it applies to are adjustable.
+- **Leadership & roles:** assign the Head Pastor, Associate Pastor, pastors, ministers, elders and **your own roles** from the member list. Choose department heads, assistants and cell leaders from members. One person can hold several roles, and their login access combines all of them. *Login access* opens Add user already filled in for that leader.
+- **Cell leaders' log book**, following the TOGG paper form: the member list, CM / UCV / ECV status, weekly ticks for cell meetings, Sunday services and weekday services, and the weekly meeting table (date, attendance, offering) with average and total rows. It can be printed.
+- **Notification bell** for everyone: personal reminders, the Head Pastor's attention items, new prayer requests and reports to review. It **plays a sound and shows a pop-up** when something new arrives, like WhatsApp Web.
+
 👉 **To put it online, follow [DEPLOY.md](DEPLOY.md).**
 
 ## Roles
@@ -48,7 +55,7 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 | Department Head | Own | **Only** members of their departments: registers and edits them; submits the monthly report, budget and plan |
 | Cell Leader | Own | **Only** their cell: its members, meeting reports and new contacts |
 
-These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **147 automated tests** check them (`npm run test:rules`).
+These rules are enforced by the database itself (`firestore.rules`), not just hidden in the screens. **172 automated tests** check them (`npm run test:rules`).
 
 ---
 
@@ -109,9 +116,10 @@ Until a provider is chosen, the system is in **Test mode**: messages are recorde
 npm run emulators   # local Auth + Firestore + Functions (needs Java)
 # .env.local:  VITE_USE_EMULATORS=true  VITE_FIREBASE_PROJECT_ID=demo-togg
 npm run dev
-npm run test:rules    # 147 security-rule tests
+npm run test:rules    # 172 security-rule tests
 npm run test:storage  # 8 voice-note / video upload tests
-npm run test:sms      # 20 SMS engine tests (audiences, reminders, absentees, birthdays, welfare…)
+npm run test:sms      # 20 SMS engine tests (Cloud Functions version)
+npm run test:sms-server  # 17 tests of the free Apps Script SMS server (incl. Gonlinesites)
 npm run typecheck
 ```
 

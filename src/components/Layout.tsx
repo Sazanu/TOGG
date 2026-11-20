@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
-  Building2, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
+  Activity, Building2, Crown, Landmark, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
@@ -9,15 +9,18 @@ import { ROLE_LABELS, can, type Capability } from '../lib/roles';
 import { Logo } from './Logo';
 import { Avatar, cx } from './ui';
 import { useCanCharity } from '../pages/Charity';
+import { NotificationBell } from './Notifications';
 
 interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability; section: string; charity?: boolean }
 
 const NAV: NavItem[] = [
   { section: '', to: '/', label: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" /> },
   { section: 'People', to: '/members', label: 'Members', icon: <Users className="h-5 w-5" />, cap: 'members.list' },
+  { section: 'People', to: '/leadership', label: 'Leadership & roles', icon: <Crown className="h-5 w-5" />, cap: 'members.list' },
   { section: 'People', to: '/registrations', label: 'Sign-ups', icon: <Inbox className="h-5 w-5" />, cap: 'registrations.manage' },
   { section: 'People', to: '/attendance', label: 'Attendance', icon: <CalendarCheck className="h-5 w-5" />, cap: 'attendance.write' },
   { section: 'People', to: '/prayer-requests', label: 'Prayer & testimonies', icon: <MessageCircleHeart className="h-5 w-5" />, cap: 'prayer.view' },
+  { section: 'Money', to: '/service-finance', label: 'Service finance', icon: <Landmark className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/tithes', label: 'Tithes', icon: <Wallet className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/giving', label: 'Giving & offerings', icon: <HandCoins className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/welfare', label: 'Welfare', icon: <HandHeart className="h-5 w-5" />, cap: 'giving.read' },
@@ -31,6 +34,7 @@ const NAV: NavItem[] = [
   { section: 'Admin', to: '/users', label: 'Users & roles', icon: <ShieldCheck className="h-5 w-5" />, cap: 'users.manage' },
   { section: 'Admin', to: '/settings', label: 'Payments & links', icon: <CreditCard className="h-5 w-5" />, cap: 'data.manage' },
   { section: 'Admin', to: '/database', label: 'Database', icon: <Database className="h-5 w-5" />, cap: 'data.manage' },
+  { section: 'Admin', to: '/status', label: 'System status', icon: <Activity className="h-5 w-5" />, cap: 'data.manage' },
 ];
 
 export function Layout() {
@@ -44,6 +48,7 @@ export function Layout() {
     <div className="flex h-full flex-col bg-royal-950 text-royal-100">
       <div className="flex items-center justify-between px-5 py-5">
         <Logo light />
+        <div className="hidden lg:block"><NotificationBell light /></div>
         <button className="rounded-lg p-1 text-royal-300 lg:hidden" onClick={() => setOpen(false)} aria-label="Close menu">
           <X className="h-5 w-5" />
         </button>
@@ -123,7 +128,7 @@ export function Layout() {
             <Menu className="h-5 w-5" />
           </button>
           <Logo />
-          <span className="w-9" />
+          <NotificationBell />
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />

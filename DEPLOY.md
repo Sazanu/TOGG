@@ -55,11 +55,15 @@ The website is only the `dist` folder, so any static host works. The routing fil
 
 Whichever host you use, enter its address in TOGG under **Payments & links → Public web address** so the QR codes and SMS links point to it.
 
-## 5. Turn on SMS (needs the Blaze plan)
-```
-npx firebase deploy --only functions
-```
-Then in the app: **SMS messages → SMS provider** → choose Arkesel / mNotify / Hubtel, Sender ID and API key → *Send test SMS*.
+## 5. Turn on SMS — free, no Blaze plan
+Follow **[sms-server/README.md](sms-server/README.md)** (about 10 minutes). In short:
+1. script.google.com → New project → paste `sms-server/Code.js` and `sms-server/appsscript.json` → run **setup**.
+2. Deploy → New deployment → **Web app** (Execute as *Me*, access *Anyone*) → copy the URL.
+3. In TOGG: **SMS messages → SMS provider** → paste the URL, choose **Gonlinesites** (or Arkesel / mNotify / Hubtel),
+   Sender ID and **API key** → Save → *Send test SMS*.
+4. Open **System status**: the SMS lines should be green. Press *Send waiting messages now* to send anything stuck.
+
+*(Alternative with the Blaze plan: `npx firebase deploy --only functions`.)*
 
 ## After an update
 Run steps 2, 3 (deploy line only), 4 and 5 again, or simply:

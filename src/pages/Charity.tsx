@@ -21,7 +21,7 @@ export function useCanCharity(): boolean {
   const { departments } = useData();
   if (!profile || !areaAllowed(profile.role, 'charity')) return false;
   if (isGlobal(profile.role)) return true;
-  return profile.role === 'dept_leader' && departments.some((d) => d.kind === 'charity' && profile.departmentIds.includes(d.id));
+  return departments.some((d) => d.kind === 'charity' && (profile.departmentIds ?? []).includes(d.id));
 }
 
 const blank = (type: CharityType): Omit<CharityEntry, 'id'> => ({

@@ -28,6 +28,7 @@ export default function Messages() {
   return (
     <div>
       <PageHeader title="Messages" subtitle="Instant and automatic SMS: announcements, programme reminders, online meeting links and missed-service follow-up." />
+      <SmsModeBanner />
       <div className="mb-6 flex gap-1 overflow-x-auto rounded-2xl border border-stone-200 bg-white p-1">
         {tabs.filter((t) => t.show).map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} className={cx('flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium', tab === t.id ? 'bg-royal-800 text-white' : 'text-stone-600 hover:bg-stone-100')}>
@@ -137,8 +138,8 @@ function Compose({ absenteesFor, onSent }: { absenteesFor: string | null; onSent
         sendAt: when === 'later' ? new Date(sendAt) : null, createdBy: profile?.uid, createdByName: profile?.displayName, estimate: count,
       });
       if (when === 'later') toast('ok', `Scheduled for ${new Date(sendAt).toLocaleString('en-GB')}.`);
-      else if (res.delivered) toast('ok', 'Message sent.');
-      else toast('err', 'Saved, but the SMS service did not respond. It will retry automatically once it is running.');
+      else if (res.delivered) toast('ok', 'Message sent to the SMS server — its result shows in “Sent & scheduled”.');
+      else toast('err', 'Saved, but no SMS server answered. Open System status to fix it; the message will go out once the server runs.');
       setMessage(''); setLabel('');
       onSent();
     } catch (err) { toast('err', errorText(err)); } finally { setBusy(false); }
@@ -241,6 +242,7 @@ function HistoryList() {
                 {m.recipientsCount !== undefined && <span>{m.sentCount ?? 0} of {m.recipientsCount} delivered to gateway</span>}
                 {m.createdByName && <span>by {m.createdByName}</span>}
                 {m.error && <span className="text-red-600">{m.error}</span>}
+                {m.providerResponse && !m.error && <span className="text-stone-400" title="Reply from the SMS company">Reply: {m.providerResponse.slice(0, 80)}</span>}
                 {m.status === 'scheduled' && <button onClick={() => cancel(m)} className="text-red-600 hover:underline">Cancel</button>}
               </div>
             </li>
@@ -452,6 +454,7 @@ function ProviderSettings() {
   useEffect(() => { if (s && !d) setD(s); }, [s, d]);
   useEffect(() => { getDoc(doc(db, 'settings', 'smsKeyStatus')).then((x) => setKeySet(!!x.data()?.set)).catch(() => setKeySet(null)); }, []);
   const hint = useMemo(() => ({
+    gonlinesites: 'Gonlinesites: paste the api_key from your Gonlinesites SMS panel (the long code in your API link). Your Sender ID must be approved by Gonlinesites.',
     arkesel: 'Arkesel: sms.arkesel.com → Dashboard → API Keys. Sender ID must be approved by Arkesel.',
     mnotify: 'mNotify: apps.mnotify.net → API → copy your API key. Register your Sender ID first.',
     hubtel: 'Hubtel: paste as clientId:clientSecret from your Hubtel API keys.',
@@ -485,8 +488,12 @@ function ProviderSettings() {
     <div className="grid gap-6 lg:grid-cols-3">
       <Card className="p-5 sm:p-6 lg:col-span-2">
         <form onSubmit={submit} className="space-y-4">
+          <Field label="SMS server (sends the messages)" hint="Free: a Google Apps Script set up once with your Google account — see sms-server/README.md. Paste its Web app URL here. Leave empty if you use Firebase Cloud Functions (Blaze plan).">
+            <Input type="url" value={d.relayUrl ?? ''} onChange={(e) => setD({ ...d, relayUrl: e.target.value })} placeholder="https://script.google.com/macros/s/…/exec" />
+          </Field>
           <Field label="SMS provider" hint={hint[d.provider]}>
             <Select value={d.provider} onChange={(e) => setD({ ...d, provider: e.target.value as SmsSettings['provider'] })}>
+              <option value="gonlinesites">Gonlinesites</option>
               <option value="arkesel">Arkesel</option><option value="mnotify">mNotify</option><option value="hubtel">Hubtel</option><option value="log">Test mode (don't send)</option>
             </Select>
           </Field>
@@ -511,4 +518,20 @@ function ProviderSettings() {
       </Card>
     </div>
   );
+}
+
+/** Red when nothing is really being sent; green when a real provider and a live SMS server are set. */
+function SmsModeBanner() {
+  const [s] = useSmsSettings();
+  const [beat, setBeat] = useState<Date | null | undefined>(undefined);
+  useEffect(() => onSnapshot(doc(db, 'meta', 'heartbeat'), (x) => setBeat(x.exists() && x.data().at ? (x.data().at as { toDate(): Date }).toDate() : null), () => setBeat(null)), []);
+  if (!s || beat === undefined) return null;
+  const live = !!beat && Date.now() - beat.getTime() < 20 * 60_000;
+  if (s.provider === 'log') {
+    return <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><b>TEST MODE — no real SMS are sent.</b> Choose Arkesel, mNotify or Hubtel under “SMS provider” and enter your API key.</div>;
+  }
+  if (!live) {
+    return <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><b>The SMS server is not running</b>{beat ? ` (last seen ${beat.toLocaleString('en-GB')})` : ''}. Messages wait in the queue until it runs. Set up the free SMS server (sms-server/README.md) and paste its address under “SMS provider”, then check <a className="underline" href="/status">System status</a>.</div>;
+  }
+  return <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><b>SMS is live</b> via {s.provider}. Server last checked in {Math.max(0, Math.round((Date.now() - beat!.getTime()) / 60000))} min ago.</div>;
 }

@@ -42,7 +42,7 @@ export default function Reports() {
   const [params, setParams] = useSearchParams();
   const month = params.get('month') ?? monthKey();
   const [type, setType] = useState<DeptReportType>((params.get('type') as DeptReportType) ?? 'report');
-  const isHead = profile?.role === 'dept_leader';
+  const isHead = !can(profile?.role, 'reports.review') && (profile?.departmentIds?.length ?? 0) > 0;
   const branchId = profile?.branchId ?? scope;
   const reports = useMonthReports(month, branchId, isHead ? profile?.departmentIds ?? [] : null);
 
@@ -133,7 +133,7 @@ export function ReportEditor() {
     }).catch(() => setR(emptyReport(deptId, branchId, month, type)));
   }, [id, deptId, branchId, month, type]);
 
-  const isHeadOfDept = profile?.role === 'dept_leader' && profile.departmentIds.includes(deptId) && profile.branchId === branchId;
+  const isHeadOfDept = !!profile?.departmentIds?.includes(deptId) && profile?.branchId === branchId;
   const isGlobalUser = profile?.role === 'head_pastor' || profile?.role === 'associate_pastor';
   const canEdit = (isHeadOfDept || isGlobalUser) && r?.status !== 'approved';
   const canReview = can(profile?.role, 'reports.review') && exists && (r?.status === 'submitted' || r?.status === 'approved' || r?.status === 'returned');

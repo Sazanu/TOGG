@@ -8,7 +8,9 @@ import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import { DAYS, MONTHS, isoDate, monthKey, monthLabel, shortDate, shiftMonth } from '../lib/format';
 import { can } from '../lib/roles';
-import type { Cell, CellReport } from '../lib/types';
+import type { Cell, CellLog, CellReport } from '../lib/types';
+import { doc as docRef } from 'firebase/firestore';
+import { logId, logTotals } from './CellLogBook';
 
 /** Cell reports between two dates. Cell leaders only read their own cells' reports. */
 export function useCellReports(branch: string, start: string, end: string, cellIds: string[] | null) {
@@ -35,12 +37,31 @@ export function useCellReports(branch: string, start: string, end: string, cellI
   return reports;
 }
 
+/** Log books for a month (managers: by branch; cell leaders: their own cells). */
+export function useCellLogs(branch: string, month: string, cellIds: string[] | null) {
+  const [logs, setLogs] = useState<CellLog[]>([]);
+  const key = cellIds?.join(',') ?? '';
+  useEffect(() => {
+    if (cellIds) {
+      const found = new Map<string, CellLog>();
+      const unsubs = cellIds.map((c) => onSnapshot(docRef(db, 'cellLogs', logId(c, month)), (s) => { if (s.exists()) found.set(s.id, { id: s.id, ...s.data() } as CellLog); else found.delete(s.id); setLogs([...found.values()]); }, () => {}));
+      if (!cellIds.length) setLogs([]);
+      return () => unsubs.forEach((u) => u());
+    }
+    const base = collection(db, 'cellLogs');
+    const q = branch === ALL ? query(base, where('month', '==', month)) : query(base, where('branchId', '==', branch), where('month', '==', month));
+    return onSnapshot(q, (s) => setLogs(s.docs.map((d) => ({ id: d.id, ...d.data() }) as CellLog)), (e) => console.error('cellLogs', e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branch, month, key]);
+  return logs;
+}
+
 export function useMyCells(): { cells: Cell[]; ids: string[] | null } {
   const { profile } = useAuth();
   const { cells } = useData();
-  if (profile?.role === 'cell_leader') {
-    const mine = cells.filter((c) => profile.cellIds?.includes(c.id));
-    return { cells: mine, ids: profile.cellIds ?? [] };
+  if (!can(profile?.role, 'cells.manage')) {
+    const mine = cells.filter((c) => profile?.cellIds?.includes(c.id));
+    return { cells: mine, ids: profile?.cellIds ?? [] };
   }
   return { cells, ids: null };
 }
@@ -102,6 +123,7 @@ export default function Cells() {
         }
       />
 
+      <LogBookSummary branch={branch} month={month} ids={ids} cells={cells} />
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Cells" value={cells.filter((c) => c.active).length} icon={<Home className="h-4 w-4" />} sub={`${cellMembers.length} people in cells`} />
         <Stat label={`Meetings in ${MONTHS[m - 1]}`} value={thisMonth.length} sub={thisMonth.length ? `Avg. attendance ${Math.round(sum(thisMonth, 'membersPresent') / thisMonth.length)}` : 'No reports yet'} />
@@ -241,3 +263,23 @@ export function CellForm({ cell, onClose }: { cell: Cell | null; onClose: () => 
 }
 
 export const CellIcon = Users;
+
+function LogBookSummary({ branch, month, ids, cells }: { branch: string; month: string; ids: string[] | null; cells: Cell[] }) {
+  const logs = useCellLogs(branch, month, ids).filter((l) => cells.some((c) => c.id === l.cellId));
+  const sums = logs.map(logTotals).reduce((t, x) => ({ meetings: t.meetings + x.meetings, att: t.att + x.attendanceTotal, offering: t.offering + x.offering, CM: t.CM + x.CM, UCV: t.UCV + x.UCV, ECV: t.ECV + x.ECV }), { meetings: 0, att: 0, offering: 0, CM: 0, UCV: 0, ECV: 0 });
+  const missing = cells.filter((c) => c.active && !logs.some((l) => l.cellId === c.id));
+  return (
+    <Card className="mb-6 p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold text-stone-900">Log books · {monthLabel(month)}</h2>
+        <span className="text-xs text-stone-500">{logs.length} of {cells.filter((c) => c.active).length} cells have filled their log book</span>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-center text-sm sm:grid-cols-6">
+        {[['Cell meetings', sums.meetings], ['Avg attendance', sums.meetings ? Math.round(sums.att / sums.meetings) : 0], ['Offering', `GH₵${sums.offering.toLocaleString()}`], ['Church members (CM)', sums.CM], ['Unestablished converts (UCV)', sums.UCV], ['Established converts (ECV)', sums.ECV]].map(([k, v]) => (
+          <div key={String(k)} className="rounded-xl bg-stone-50 py-3"><div className="font-display text-xl font-bold text-royal-950">{v}</div><div className="text-[11px] text-stone-500">{k}</div></div>
+        ))}
+      </div>
+      {missing.length > 0 && <p className="mt-3 text-xs text-amber-700">No log book yet: {missing.map((c) => c.name).join(', ')}</p>}
+    </Card>
+  );
+}

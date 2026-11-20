@@ -11,6 +11,9 @@ import { can } from '../lib/roles';
 import type { Cell, CellReport, NewContact } from '../lib/types';
 import { CellForm, useCellReports } from './Cells';
 import { emptyMember } from './Members';
+import CellLogBook, { logTotals } from './CellLogBook';
+import { useCellLogs } from './Cells';
+import { monthKey, monthLabel } from '../lib/format';
 
 export default function CellDetail() {
   const { id = '' } = useParams();
@@ -19,7 +22,7 @@ export default function CellDetail() {
   const toast = useToast();
   const cell = cells.find((c) => c.id === id);
   const role = profile?.role;
-  const isCellLeader = role === 'cell_leader' && !!profile?.cellIds?.includes(id);
+  const isCellLeader = !!profile?.cellIds?.includes(id);
   const canManage = can(role, 'cells.manage');
   const canReport = canManage || isCellLeader;
   const canEditCell = canManage;
@@ -32,9 +35,6 @@ export default function CellDetail() {
   const inCell = members.filter((m) => m.cellId === id);
 
   if (!cell) return <Empty icon={<Home />} title="Cell not found"><Link className="text-royal-700 underline" to="/cells">Back to cells</Link></Empty>;
-
-  const last4 = sorted.slice(0, 4);
-  const avg = last4.length ? Math.round(last4.reduce((t, r) => t + r.membersPresent + r.firstTimers, 0) / last4.length) : 0;
 
   async function removeFromCell(mid: string) {
     try { await updateDoc(doc(db, 'members', mid), { cellId: null, updatedAt: serverTimestamp() }); }
@@ -50,23 +50,20 @@ export default function CellDetail() {
         actions={
           <>
             {canEditCell && <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /> Edit</Button>}
-            {canReport && <Button onClick={() => setReporting('new')}><ClipboardPlus className="h-4 w-4" /> Meeting report</Button>}
+
           </>
         }
       />
       <p className="-mt-3 mb-6 text-sm text-stone-500">Leader: {cell.leaderName || '—'}{cell.leaderPhone && ` · ${cell.leaderPhone}`}</p>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Members" value={inCell.length} />
-        <Stat label="Average attendance" value={avg} sub="last 4 meetings" />
-        <Stat label="First-timers (all time)" value={reports.reduce((t, r) => t + r.firstTimers, 0)} />
-        <Stat label="New converts (all time)" value={reports.reduce((t, r) => t + r.newConverts, 0)} />
-      </div>
+      <CellMonthStats cell={cell} members={inCell.length} />
+
+      <div className="mb-6"><CellLogBook cell={cell} canEdit={canReport} /></div>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-3">
-          <div className="border-b border-stone-100 px-5 py-4"><h2 className="font-semibold text-stone-900">Meeting reports</h2></div>
-          {sorted.length === 0 ? <Empty icon={<ClipboardPlus />} title="No reports yet">{canReport && 'After each meeting, submit a short report: attendance, first-timers, converts and new contacts.'}</Empty> : (
+          <div className="border-b border-stone-100 px-5 py-4"><h2 className="font-semibold text-stone-900">Earlier meeting reports</h2></div>
+          {sorted.length === 0 ? <Empty icon={<ClipboardPlus />} title="No reports yet">Weekly reports are now kept in the log book above.</Empty> : (
             <ul className="divide-y divide-stone-100">
               {sorted.map((r) => (
                 <li key={r.id} className="px-5 py-4">
@@ -251,5 +248,20 @@ function CellReportForm({ cell, report, canDelete, onClose }: { cell: Cell; repo
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** This month at a glance, from the cell leaders' log book. */
+function CellMonthStats({ cell, members }: { cell: Cell; members: number }) {
+  const month = monthKey();
+  const log = useCellLogs(cell.branchId, month, [cell.id])[0];
+  const t = log ? logTotals(log) : null;
+  return (
+    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <Stat label="Members" value={members} />
+      <Stat label={`Meetings · ${monthLabel(month)}`} value={t?.meetings ?? 0} sub={t ? `Average attendance ${t.attendanceAvg}` : 'Log book not started'} />
+      <Stat label="Offering this month" value={money(t?.offering ?? 0)} />
+      <Stat label="Converts this month" value={(t?.UCV ?? 0) + (t?.ECV ?? 0)} sub={t ? `${t.UCV} UCV · ${t.ECV} ECV · ${t.CM} CM` : undefined} />
+    </div>
   );
 }

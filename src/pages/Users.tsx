@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, createUserWithEmailAndPassword, getAuth, signOut } from 'firebase/auth';
 import { collection, doc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
@@ -20,6 +21,28 @@ export default function Users() {
   const [users, setUsers] = useState<AppUser[] | null>(null);
   const [editing, setEditing] = useState<AppUser | null>(null);
   const [adding, setAdding] = useState(false);
+  // Opened from Leadership → "Login access": fill the form from the member's roles.
+  const [params, setParams] = useSearchParams();
+  const { memberById, deptTree, cells } = useData();
+  const prefill = useMemo<Prefill | undefined>(() => {
+    const m = memberById.get(params.get('member') ?? '');
+    if (!m) return undefined;
+    const depts = deptTree.filter(({ dept }) => dept.headMemberId === m.id || dept.assistantMemberId === m.id).map(({ dept }) => dept.id);
+    const myCells = cells.filter((c) => c.leaderMemberId === m.id).map((c) => c.id);
+    const pos = m.positions ?? [];
+    const role: Role = pos.includes('Head Pastor') ? 'head_pastor' : pos.includes('Associate Pastor') ? 'associate_pastor' : pos.includes('Pastor') ? 'branch_pastor'
+      : depts.length ? 'dept_leader' : myCells.length ? 'cell_leader' : 'secretary';
+    return { name: `${m.title ? `${m.title} ` : ''}${m.firstName} ${m.lastName}`.trim(), phone: m.phone, email: m.email, role, branchId: m.branchId, departmentIds: depts, cellIds: myCells, memberId: m.id };
+  }, [params, memberById, deptTree, cells]);
+  useEffect(() => {
+    if (!prefill || !users) return;
+    const existing = users.find((u) => (u as AppUser & { memberId?: string }).memberId === prefill.memberId || (prefill.email && u.email === prefill.email.toLowerCase()));
+    if (existing) setEditing(existing); else setAdding(true);
+    params.delete('member'); setParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill, users]);
+  const [prefillUsed, setPrefillUsed] = useState<Prefill | undefined>(undefined);
+  useEffect(() => { if (prefill) setPrefillUsed(prefill); }, [prefill]);
 
   useEffect(() => onSnapshot(collection(db, 'users'), (s) => {
     const list = s.docs.map((d) => ({ uid: d.id, ...d.data() }) as AppUser);
@@ -61,24 +84,26 @@ export default function Users() {
         )}
       </Card>
       {editing && <UserForm user={editing} onClose={() => setEditing(null)} />}
-      {adding && <UserForm user={null} all={users} onClose={() => setAdding(false)} />}
+      {adding && <UserForm user={null} all={users} prefill={prefillUsed} onClose={() => { setAdding(false); setPrefillUsed(undefined); }} />}
     </div>
   );
 }
 
-function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () => void; all?: AppUser[] | null }) {
+interface Prefill { name: string; phone: string; email: string; role: Role; branchId: string; departmentIds: string[]; cellIds: string[]; memberId: string }
+
+function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClose: () => void; all?: AppUser[] | null; prefill?: Prefill }) {
   const { profile } = useAuth();
   const { branches, deptTree, cells, deptWithChildren } = useData();
   const toast = useToast();
-  const [role, setRole] = useState<Role>(user?.role ?? 'secretary');
-  const [branchId, setBranchId] = useState(user?.branchId ?? '');
-  const [deptIds, setDeptIds] = useState<string[]>(user?.departmentIds ?? []);
-  const [cellIds, setCellIds] = useState<string[]>(user?.cellIds ?? []);
+  const [role, setRole] = useState<Role>(user?.role ?? prefill?.role ?? 'secretary');
+  const [branchId, setBranchId] = useState(user?.branchId ?? prefill?.branchId ?? '');
+  const [deptIds, setDeptIds] = useState<string[]>(user?.departmentIds ?? prefill?.departmentIds ?? []);
+  const [cellIds, setCellIds] = useState<string[]>(user?.cellIds ?? prefill?.cellIds ?? []);
   const [revoked, setRevoked] = useState<Area[]>(user?.revoked ?? []);
   const [active, setActive] = useState(!user || user.role === 'pending' ? true : user.active);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
+  const [name, setName] = useState(prefill?.name ?? '');
+  const [email, setEmail] = useState(prefill?.email ?? '');
+  const [phone, setPhone] = useState(prefill?.phone ?? '');
   const [password, setPassword] = useState(() => `Togg-${Math.random().toString(36).slice(2, 8)}`);
   const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,12 +118,13 @@ function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () =>
     if (role === 'cell_leader' && !cellIds.length) { toast('err', 'Choose the cell(s) this leader runs.'); return; }
     setBusy(true);
     // A department head automatically covers the departments under theirs.
-    const fullDepts = role === 'dept_leader' ? [...new Set(deptIds.flatMap(deptWithChildren))] : [];
+    const leads = !isGlobal(role) && role !== 'pending';
+    const fullDepts = leads ? [...new Set(deptIds.flatMap(deptWithChildren))] : [];
     const access = {
       role,
       branchId: needsBranch ? branchId : null,
       departmentIds: fullDepts,
-      cellIds: role === 'cell_leader' ? cellIds.filter((c) => cells.find((x) => x.id === c)?.branchId === branchId) : [],
+      cellIds: leads ? cellIds.filter((c) => cells.find((x) => x.id === c)?.branchId === branchId) : [],
       active: role === 'pending' ? false : active,
       revoked: role === 'head_pastor' ? [] : revoked.filter((a) => areasForRole(role).includes(a)),
     };
@@ -116,6 +142,7 @@ function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () =>
           const cred = await createUserWithEmailAndPassword(a, email.trim(), password);
           await setDoc(doc(db, 'users', cred.user.uid), {
             ...access, email: email.trim().toLowerCase(), displayName: name.trim(), phone: phone.trim(), createdAt: serverTimestamp(), createdBy: profile?.uid ?? '',
+            ...(prefill?.memberId ? { memberId: prefill.memberId } : {}),
           });
           await signOut(a);
         } finally { await deleteApp(second); }
@@ -172,9 +199,9 @@ function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () =>
             </Select>
           </Field>
         )}
-        {role === 'dept_leader' && (
+        {needsBranch && (
           <div>
-            <span className="mb-2 block text-sm font-medium text-stone-700">Departments they lead <span className="font-normal text-stone-400">(sub-departments are included automatically)</span></span>
+            <span className="mb-2 block text-sm font-medium text-stone-700">{role === 'dept_leader' ? 'Departments they lead' : 'Also leads departments (optional)'} <span className="font-normal text-stone-400">(sub-departments are included automatically)</span></span>
             <div className="flex flex-wrap gap-2">
               {deptTree.map(({ dept: d }) => {
                 const on = deptIds.includes(d.id);
@@ -188,9 +215,9 @@ function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () =>
             </div>
           </div>
         )}
-        {role === 'cell_leader' && (
+        {needsBranch && (
           <div>
-            <span className="mb-2 block text-sm font-medium text-stone-700">Cells they lead</span>
+            <span className="mb-2 block text-sm font-medium text-stone-700">{role === 'cell_leader' ? 'Cells they lead' : 'Also leads cells (optional)'}</span>
             {cells.filter((c) => c.branchId === branchId).length === 0 ? <p className="text-sm text-stone-500">{branchId ? 'No cells in this branch yet.' : 'Choose a branch first.'}</p> : (
               <div className="flex flex-wrap gap-2">
                 {cells.filter((c) => c.branchId === branchId).map((c) => {
@@ -205,6 +232,9 @@ function UserForm({ user, onClose, all }: { user: AppUser | null; onClose: () =>
               </div>
             )}
           </div>
+        )}
+        {needsBranch && (deptIds.length > 0 || cellIds.length > 0) && role !== 'dept_leader' && role !== 'cell_leader' && (
+          <p className="-mt-2 text-xs text-emerald-700">One person, several roles: they keep everything their main role allows, plus access to the departments and cells they lead.</p>
         )}
         {role !== 'pending' && role !== 'head_pastor' && (
           <div className="rounded-xl border border-stone-200 p-4">
