@@ -116,6 +116,12 @@ export async function resolveRecipients(a: Audience, branchLock: string | null):
         return r;
       }));
     }
+    case 'cell': {
+      // Query the cell directly: a cell leader may read only their own cell's members.
+      if (!a.cellId) return [];
+      const docs = rows<Member>((await getDocs(query(collection(db, 'members'), where('cellId', '==', a.cellId), ...(branch ? [where('branchId', '==', branch)] : [])))).docs);
+      return dedupe(docs.filter(ok).map(member));
+    }
     default: {
       let list = (await membersOf(branch)).filter(ok);
       if (a.type === 'department' && a.departmentId) {
@@ -124,7 +130,6 @@ export async function resolveRecipients(a: Audience, branchLock: string | null):
         go(a.departmentId);
         list = list.filter((m) => (m.departmentIds ?? []).some((x) => ids.has(x)));
       } else if (a.type === 'department') list = [];
-      if (a.type === 'cell') list = a.cellId ? list.filter((m) => m.cellId === a.cellId) : [];
       if (a.type === 'category') list = list.filter((m) => m.category === (a.category || 'adult'));
       return dedupe(list.map(member));
     }

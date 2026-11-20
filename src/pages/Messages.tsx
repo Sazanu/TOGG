@@ -451,9 +451,12 @@ function ProviderSettings() {
   const [keySet, setKeySet] = useState<boolean | null>(null);
   const [testTo, setTestTo] = useState('');
   const [testing, setTesting] = useState(false);
-  useEffect(() => { if (s && !d) setD({ ...s, provider: s.provider === 'log' ? 'log' : 'gonlinesites', relayUrl: isServerUrl(s.relayUrl ?? '') ? s.relayUrl : '' }); }, [s, d]);
+  const [newSender, setNewSender] = useState('');
+  const [confirmNew, setConfirmNew] = useState(false);
+  useEffect(() => { if (s && !d) setD({ ...s, provider: s.provider === 'log' ? 'log' : 'gonlinesites', relayUrl: isServerUrl(s.relayUrl ?? '') ? s.relayUrl : '', senderId: ['TOGG', ...(s.approvedSenders ?? [])].includes(s.senderId) ? s.senderId : 'TOGG' }); }, [s, d]);
   useEffect(() => { getDoc(doc(db, 'settings', 'smsKeyStatus')).then((x) => setKeySet(!!x.data()?.set)).catch(() => setKeySet(null)); }, []);
   if (!d) return <Spinner />;
+  const approved = [...new Set(['TOGG', ...(d.approvedSenders ?? [])])];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -502,9 +505,19 @@ function ProviderSettings() {
               <Input type="password" autoComplete="off" className="pl-9" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={keySet ? '•••••••• (saved)' : 'Paste API key or API link'} />
             </div>
           </Field>
-          <Field label="Sender ID" hint="Must be approved on your Gonlinesites account first (e.g. TOGG). A name that is not approved yet, such as GracePalace, is rejected by Gonlinesites (error 106) — ask Gonlinesites to register it, then type it here.">
-            <Input maxLength={11} value={d.senderId} onChange={(e) => setD({ ...d, senderId: e.target.value })} />
+          <Field label="Sender ID" hint="Only names Gonlinesites has approved on your account work. Any other name is silently refused (error 106) and nobody receives the SMS.">
+            <Select value={d.senderId} onChange={(e) => setD({ ...d, senderId: e.target.value })}>
+              {approved.map((x) => <option key={x} value={x}>{x}</option>)}
+            </Select>
           </Field>
+          <div className="rounded-xl border border-dashed border-stone-300 p-3 text-sm">
+            <div className="font-medium text-stone-700">Gonlinesites approved a new sender ID?</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Input className="max-w-[12rem]" maxLength={11} value={newSender} onChange={(e) => setNewSender(e.target.value.replace(/[^A-Za-z0-9 ]/g, ''))} placeholder="e.g. GracePalace" />
+              <label className="flex items-center gap-2 text-xs text-stone-600"><input type="checkbox" checked={confirmNew} onChange={(e) => setConfirmNew(e.target.checked)} /> Gonlinesites has confirmed it is approved</label>
+              <Button type="button" size="sm" variant="outline" disabled={!newSender.trim() || !confirmNew} onClick={() => { const n = newSender.trim(); setD({ ...d, approvedSenders: [...new Set([...approved, n])], senderId: n }); setNewSender(''); setConfirmNew(false); }}>Add &amp; use</Button>
+            </div>
+          </div>
           <details className="rounded-xl border border-stone-200 p-3 text-sm">
             <summary className="cursor-pointer font-medium text-stone-700">Automatic messages (optional server)</summary>
             <p className="mt-2 text-stone-500">Messages you send go to Gonlinesites straight from this app. Automatic ones (absentees after service, birthdays, programme reminders, Paystack confirmations) need the free Google Apps Script server — see <code>sms-server/README.md</code>. Paste <b>its</b> address here, never the Gonlinesites link.</p>

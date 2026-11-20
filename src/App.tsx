@@ -43,9 +43,27 @@ const Settings = lazy(() => import('./pages/Settings'));
 const PublicPay = lazy(() => import('./pages/PublicPay'));
 const Status = lazy(() => import('./pages/Status'));
 const ServiceFinance = lazy(() => import('./pages/ServiceFinance'));
+const CollectionDetail = lazy(() => import('./pages/ServiceFinance').then((x) => ({ default: x.CollectionDetail })));
+const Expenses = lazy(() => import('./pages/Expenses'));
 const Leadership = lazy(() => import('./pages/Leadership'));
 const Station = lazy(() => import('./pages/Station'));
 const PublicHere = lazy(() => import('./pages/PublicHere'));
+
+/** Unknown address inside the app: say so, and offer a way back (never a dead end). */
+function NotFound() {
+  const back = () => { if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0 || window.history.length > 1) window.history.back(); else window.location.assign('/'); };
+  return (
+    <div className="mx-auto max-w-md py-16 text-center">
+      <div className="font-display text-6xl font-extrabold text-royal-200">404</div>
+      <h1 className="mt-2 font-display text-xl font-bold text-royal-950">Page not found</h1>
+      <p className="mt-1 text-sm text-stone-500">This address does not exist, or you do not have access to it.</p>
+      <div className="mt-6 flex justify-center gap-2">
+        <button onClick={back} className="rounded-xl border border-stone-300 px-4 py-2 text-sm">← Back</button>
+        <a href="/" className="rounded-xl bg-royal-800 px-4 py-2 text-sm font-semibold text-white">Dashboard</a>
+      </div>
+    </div>
+  );
+}
 
 function CharityGuard({ children }: { children: ReactNode }) {
   const ok = useCanCharity();
@@ -84,6 +102,8 @@ function Private() {
           <Route path="settings" element={<Guard cap="data.manage"><Settings /></Guard>} />
           <Route path="leadership" element={<Guard cap="members.list"><Leadership /></Guard>} />
           <Route path="service-finance" element={<Guard cap="giving.read"><ServiceFinance /></Guard>} />
+          <Route path="service-finance/:id" element={<Guard cap="giving.read"><CollectionDetail /></Guard>} />
+          <Route path="expenses" element={<Guard cap="giving.read"><Expenses /></Guard>} />
           <Route path="status" element={<Guard cap="data.manage"><Status /></Guard>} />
           <Route path="attendance" element={<Guard cap="attendance.write"><Attendance /></Guard>} />
           <Route path="attendance/:serviceId" element={<Guard cap="attendance.write"><CheckIn /></Guard>} />
@@ -100,7 +120,7 @@ function Private() {
           <Route path="messages" element={<Guard cap="sms.send"><Messages /></Guard>} />
           <Route path="database" element={<Guard cap="data.manage"><Database /></Guard>} />
           <Route path="users" element={<Guard cap="users.manage"><Users /></Guard>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
       </Suspense>

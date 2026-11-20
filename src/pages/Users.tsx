@@ -7,8 +7,9 @@ import { Pencil, ShieldCheck, UserPlus } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Spinner, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { officesOf } from '../lib/offices';
 import { db, firebaseConfig, usingEmulators } from '../lib/firebase';
-import { AREA_LABELS, ASSIGNABLE_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, areasForRole, isGlobal, type Area, type Role } from '../lib/roles';
+import { AREA_LABELS, ASSIGNABLE_ROLES, GRANTABLE, ROLE_DESCRIPTIONS, ROLE_LABELS, areasForRole, isGlobal, type Area, type Role } from '../lib/roles';
 import type { AppUser } from '../lib/types';
 
 const ROLE_COLOR: Partial<Record<Role, 'gold' | 'royal' | 'green' | 'gray' | 'blue'>> = {
@@ -93,13 +94,24 @@ interface Prefill { name: string; phone: string; email: string; role: Role; bran
 
 function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClose: () => void; all?: AppUser[] | null; prefill?: Prefill }) {
   const { profile } = useAuth();
-  const { branches, deptTree, cells, deptWithChildren } = useData();
+  const { branches, deptTree, cells, deptWithChildren, members } = useData();
   const toast = useToast();
   const [role, setRole] = useState<Role>(user?.role ?? prefill?.role ?? 'secretary');
   const [branchId, setBranchId] = useState(user?.branchId ?? prefill?.branchId ?? '');
-  const [deptIds, setDeptIds] = useState<string[]>(user?.departmentIds ?? prefill?.departmentIds ?? []);
-  const [cellIds, setCellIds] = useState<string[]>(user?.cellIds ?? prefill?.cellIds ?? []);
+  const [memberId, setMemberId] = useState(user?.memberId ?? prefill?.memberId ?? '');
+  const allDepts = deptTree.map(({ dept }) => dept);
+  const offices = memberId ? officesOf(memberId, allDepts, cells) : { departmentIds: [], cellIds: [] };
+  // What was given by hand (not by an office) stays editable; office access is shown locked.
+  const [deptIds, setDeptIds] = useState<string[]>(() => {
+    const off = new Set([...(user?.officeDepartmentIds ?? []), ...offices.departmentIds]);
+    return (user?.departmentIds ?? prefill?.departmentIds ?? []).filter((x) => !off.has(x));
+  });
+  const [cellIds, setCellIds] = useState<string[]>(() => {
+    const off = new Set([...(user?.officeCellIds ?? []), ...offices.cellIds]);
+    return (user?.cellIds ?? prefill?.cellIds ?? []).filter((x) => !off.has(x));
+  });
   const [revoked, setRevoked] = useState<Area[]>(user?.revoked ?? []);
+  const [granted, setGranted] = useState<Area[]>(user?.granted ?? []);
   const [active, setActive] = useState(!user || user.role === 'pending' ? true : user.active);
   const [name, setName] = useState(prefill?.name ?? '');
   const [email, setEmail] = useState(prefill?.email ?? '');
@@ -114,19 +126,23 @@ function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClo
   async function save(e: FormEvent) {
     e.preventDefault();
     if (needsBranch && !branchId) { toast('err', 'Choose the branch this person serves in.'); return; }
-    if (role === 'dept_leader' && !deptIds.length) { toast('err', 'Choose the department(s) this head leads.'); return; }
-    if (role === 'cell_leader' && !cellIds.length) { toast('err', 'Choose the cell(s) this leader runs.'); return; }
+    if (role === 'dept_leader' && !deptIds.length && !offices.departmentIds.length) { toast('err', 'Choose the department(s) this head leads, or link their member record if they are a department head.'); return; }
+    if (role === 'cell_leader' && !cellIds.length && !offices.cellIds.length) { toast('err', 'Choose the cell(s) this leader runs, or link their member record if they lead a cell.'); return; }
     setBusy(true);
     // A department head automatically covers the departments under theirs.
     const leads = !isGlobal(role) && role !== 'pending';
-    const fullDepts = leads ? [...new Set(deptIds.flatMap(deptWithChildren))] : [];
+    const fullDepts = leads ? [...new Set([...deptIds.flatMap(deptWithChildren), ...offices.departmentIds])] : [];
     const access = {
       role,
       branchId: needsBranch ? branchId : null,
       departmentIds: fullDepts,
-      cellIds: leads ? cellIds.filter((c) => cells.find((x) => x.id === c)?.branchId === branchId) : [],
+      cellIds: leads ? [...new Set([...cellIds.filter((c) => cells.find((x) => x.id === c)?.branchId === branchId), ...offices.cellIds])] : [],
+      officeDepartmentIds: leads ? offices.departmentIds : [],
+      officeCellIds: leads ? offices.cellIds : [],
+      memberId,
       active: role === 'pending' ? false : active,
       revoked: role === 'head_pastor' ? [] : revoked.filter((a) => areasForRole(role).includes(a)),
+      granted: needsBranch ? granted.filter((a) => !areasForRole(role).includes(a)) : [],
     };
     try {
       if (user) {
@@ -142,7 +158,6 @@ function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClo
           const cred = await createUserWithEmailAndPassword(a, email.trim(), password);
           await setDoc(doc(db, 'users', cred.user.uid), {
             ...access, email: email.trim().toLowerCase(), displayName: name.trim(), phone: phone.trim(), createdAt: serverTimestamp(), createdBy: profile?.uid ?? '',
-            ...(prefill?.memberId ? { memberId: prefill.memberId } : {}),
           });
           await signOut(a);
         } finally { await deleteApp(second); }
@@ -199,11 +214,27 @@ function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClo
             </Select>
           </Field>
         )}
+        <Field label="Linked member record" hint="Link the person's member record: the departments they head and the cells they lead then give access automatically, and it is removed when the office changes.">
+          <Select value={memberId} onChange={(e) => setMemberId(e.target.value)}>
+            <option value="">Not linked</option>
+            {members.filter((m) => !branchId || m.branchId === branchId || m.id === memberId).sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
+              .map((m) => <option key={m.id} value={m.id}>{m.firstName} {m.lastName}{m.phone ? ` · ${m.phone}` : ''}</option>)}
+          </Select>
+        </Field>
+        {(offices.departmentIds.length > 0 || offices.cellIds.length > 0) && (
+          <div className="rounded-xl bg-gold-50 p-3 text-sm text-stone-700">
+            <div className="mb-1 font-medium">From their offices (automatic)</div>
+            <div className="flex flex-wrap gap-1.5">
+              {offices.departmentIds.map((id) => <span key={id} className="rounded-full bg-gold-200 px-2.5 py-1 text-xs">{allDepts.find((d) => d.id === id)?.name ?? id}</span>)}
+              {offices.cellIds.map((id) => <span key={id} className="rounded-full bg-gold-200 px-2.5 py-1 text-xs">Cell: {cells.find((c) => c.id === id)?.name ?? id}</span>)}
+            </div>
+          </div>
+        )}
         {needsBranch && (
           <div>
             <span className="mb-2 block text-sm font-medium text-stone-700">{role === 'dept_leader' ? 'Departments they lead' : 'Also leads departments (optional)'} <span className="font-normal text-stone-400">(sub-departments are included automatically)</span></span>
             <div className="flex flex-wrap gap-2">
-              {deptTree.map(({ dept: d }) => {
+              {deptTree.filter(({ dept: d }) => !offices.departmentIds.includes(d.id)).map(({ dept: d }) => {
                 const on = deptIds.includes(d.id);
                 return (
                   <button type="button" key={d.id} onClick={() => setDeptIds(on ? deptIds.filter((x) => x !== d.id) : [...deptIds, d.id])}
@@ -220,7 +251,7 @@ function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClo
             <span className="mb-2 block text-sm font-medium text-stone-700">{role === 'cell_leader' ? 'Cells they lead' : 'Also leads cells (optional)'}</span>
             {cells.filter((c) => c.branchId === branchId).length === 0 ? <p className="text-sm text-stone-500">{branchId ? 'No cells in this branch yet.' : 'Choose a branch first.'}</p> : (
               <div className="flex flex-wrap gap-2">
-                {cells.filter((c) => c.branchId === branchId).map((c) => {
+                {cells.filter((c) => c.branchId === branchId && !offices.cellIds.includes(c.id)).map((c) => {
                   const on = cellIds.includes(c.id);
                   return (
                     <button type="button" key={c.id} onClick={() => setCellIds(on ? cellIds.filter((x) => x !== c.id) : [...cellIds, c.id])}
@@ -247,6 +278,21 @@ function UserForm({ user, onClose, all, prefill }: { user: AppUser | null; onClo
                 <label key={a} className="flex items-center gap-2 text-sm text-stone-700">
                   <input type="checkbox" className="rounded border-stone-300" checked={!revoked.includes(a)}
                     onChange={(e) => setRevoked(e.target.checked ? revoked.filter((x) => x !== a) : [...revoked, a])} />
+                  {AREA_LABELS[a]}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {needsBranch && GRANTABLE.some((a) => !areasForRole(role).includes(a)) && (
+          <div className="rounded-xl border border-stone-200 p-4">
+            <span className="block text-sm font-medium text-stone-700">Also give access to</span>
+            <span className="mb-3 block text-xs text-stone-500">Extra areas on top of the {ROLE_LABELS[role]} role, for their own branch.</span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {GRANTABLE.filter((a) => !areasForRole(role).includes(a)).map((a) => (
+                <label key={a} className="flex items-center gap-2 text-sm text-stone-700">
+                  <input type="checkbox" className="rounded border-stone-300" checked={granted.includes(a)}
+                    onChange={(e) => setGranted(e.target.checked ? [...granted, a] : granted.filter((x) => x !== a))} />
                   {AREA_LABELS[a]}
                 </label>
               ))}

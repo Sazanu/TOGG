@@ -2,7 +2,7 @@ import { Suspense, useState, type ReactNode } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import {
-  Activity, Building2, Crown, Landmark, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
+  Activity, Building2, Crown, Landmark, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, Receipt, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
@@ -23,6 +23,7 @@ const NAV: NavItem[] = [
   { section: 'People', to: '/attendance', label: 'Attendance', icon: <CalendarCheck className="h-5 w-5" />, cap: 'attendance.write' },
   { section: 'People', to: '/prayer-requests', label: 'Prayer & testimonies', icon: <MessageCircleHeart className="h-5 w-5" />, cap: 'prayer.view' },
   { section: 'Money', to: '/service-finance', label: 'Service finance', icon: <Landmark className="h-5 w-5" />, cap: 'giving.read' },
+  { section: 'Money', to: '/expenses', label: 'Expenses & offerings', icon: <Receipt className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/tithes', label: 'Tithes', icon: <Wallet className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/giving', label: 'Giving & offerings', icon: <HandCoins className="h-5 w-5" />, cap: 'giving.read' },
   { section: 'Money', to: '/welfare', label: 'Welfare', icon: <HandHeart className="h-5 w-5" />, cap: 'giving.read' },

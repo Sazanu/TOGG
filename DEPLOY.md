@@ -75,6 +75,9 @@ Follow **[sms-server/README.md](sms-server/README.md)** (about 10 minutes). In s
 4. Open `/pay` on your site and give a test amount with Paystack's test card or test MoMo number. It should show **"received and recorded"** and appear under **Giving → Online payments**.
 5. When you're happy, replace both keys with the **Live** keys. **System status** turns green.
 
+## 7. Let members sign up
+If sign-up shows **auth/admin-restricted-operation**, go to Firebase console → **Authentication → Settings → User actions**, tick **Enable create (sign-up)**, and Save. This also lets admins add users.
+
 ## After an update
 Run steps 2, 3 (deploy line only), 4 and 5 again, or simply:
 ```

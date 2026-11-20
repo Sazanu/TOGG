@@ -14,6 +14,13 @@ export interface AppUser {
   cellIds?: string[];
   /** Areas the Super Admin has switched off for this person. */
   revoked?: Area[];
+  /** Extra areas given on top of the role (own branch). */
+  granted?: Area[];
+  /** The member record of this person: their offices (department head, cell leader…) give them access automatically. */
+  memberId?: string;
+  /** Departments / cells given by the offices they hold (kept in step by the Leadership page). */
+  officeDepartmentIds?: string[];
+  officeCellIds?: string[];
   active: boolean;
   createdAt?: unknown;
 }
@@ -246,6 +253,8 @@ export interface Programme {
 }
 
 export interface SmsSettings {
+  /** Sender IDs Gonlinesites has approved (others are refused with error 106). */
+  approvedSenders?: string[];
   provider: 'gonlinesites' | 'arkesel' | 'hubtel' | 'mnotify' | 'log';
   /** Web-app URL of the free Google Apps Script SMS server (sms-server/). */
   relayUrl?: string;
@@ -363,9 +372,22 @@ export interface Collection {
   serviceType: string;
   title: string;
   lines: Record<string, number>;
-  expenses: { item: string; amount: number }[];
+  expenses: Expense[];
+  /** Offerings (line keys) the 30% is taken from at this service; empty/missing = the default in settings. */
+  remitLines?: string[];
   countedBy: string;
   notes: string;
+}
+
+/** Money spent out of a service collection. `source` is the offering it was taken from (a collection line key). */
+export interface Expense {
+  item: string;
+  amount: number;
+  source?: string;
+  details?: string;
+  paidTo?: string;
+  approvedBy?: string;
+  date?: string;
 }
 
 /** Status on the cell leaders' log book: Church Member, Unestablished Convert, Established Convert. */

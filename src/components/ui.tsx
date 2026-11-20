@@ -195,6 +195,7 @@ export function errorText(e: unknown): string {
     'auth/weak-password': 'Password must be at least 6 characters.',
     'auth/invalid-email': 'That email address is not valid.',
     'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/admin-restricted-operation': 'New accounts are switched off for this church system. The Head Pastor must turn them on: Firebase console → Authentication → Settings → User actions → tick "Enable create (sign-up)" → Save. After that, members can sign up and wait for approval, and admins can add users.',
     'auth/operation-not-allowed': 'Email/password sign-in is switched off. Turn it on in Firebase console → Authentication → Sign-in method.',
     'auth/network-request-failed': 'No internet connection. Check your network and try again.',
     'auth/user-disabled': 'This login has been disabled.',

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import { Bell, BellRing, Check, Clock, Plus, Volume2 } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, Clock, Plus, Volume2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { monthKey, prettyDate, today } from '../lib/format';
@@ -18,6 +18,7 @@ interface Item { id: string; kind: 'reminder' | 'pastoral' | 'prayer' | 'report'
 
 const nowLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const SEEN_KEY = 'togg.notified';
+const MUTE_KEY = 'togg.muteReminders';
 
 /** The bell: due reminders + things waiting for this person. Rings and pops up when something new arrives. */
 export function NotificationBell({ light }: { light?: boolean }) {
@@ -65,7 +66,7 @@ export function NotificationBell({ light }: { light?: boolean }) {
     const fresh = items.filter((i) => !seen.includes(i.id));
     if (fresh.length) {
       if (!first.current || fresh.some((i) => i.kind === 'reminder' || i.kind === 'pastoral')) {
-        playChime();
+        if (!mutedRef.current) playChime();
         fresh.slice(0, 3).forEach((i) => popUp(i.title, i.detail, () => i.link && nav(i.link)));
       }
       try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen, ...fresh.map((i) => i.id)].slice(-500))); } catch { /* */ }
@@ -73,8 +74,12 @@ export function NotificationBell({ light }: { light?: boolean }) {
     first.current = false;
   }, [items, nav]);
 
-  // Keep ringing for due reminders (and the Head Pastor's attention items) at the interval the Head Pastor set.
+  // Keep ringing for due reminders (and the Head Pastor's attention items) at the interval the Head Pastor set,
+  // until each one is marked done (or snoozed), or the person mutes the sound on this device.
   const { reminderRepeatMinutes } = useSecuritySettings();
+  const [muted, setMuted] = useState(() => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } });
+  const mutedRef = useRef(muted); mutedRef.current = muted;
+  const setMute = (on: boolean) => { setMuted(on); try { localStorage.setItem(MUTE_KEY, on ? '1' : '0'); } catch { /* */ } toast('ok', on ? 'Reminder sound muted on this device.' : 'Reminder sound is on.'); };
   const urgent = items.filter((i) => i.kind === 'reminder' || i.kind === 'pastoral');
   const urgentRef = useRef(urgent); urgentRef.current = urgent;
   useEffect(() => {
@@ -82,7 +87,7 @@ export function NotificationBell({ light }: { light?: boolean }) {
     const t = setInterval(() => {
       const u = urgentRef.current;
       if (!u.length) return;
-      playChime();
+      if (!mutedRef.current) playChime();
       popUp(u.length === 1 ? `Reminder: ${u[0].title}` : `${u.length} reminders waiting`, u.length === 1 ? u[0].detail : u.slice(0, 3).map((x) => x.title).join(' · '), () => u[0].link && nav(u[0].link));
     }, reminderRepeatMinutes * 60_000);
     return () => clearInterval(t);
@@ -116,6 +121,7 @@ export function NotificationBell({ light }: { light?: boolean }) {
             <div className="sticky top-0 flex items-center justify-between border-b border-stone-100 bg-white px-4 py-3">
               <b className="text-sm">Notifications</b>
               <div className="flex gap-1">
+                <Button size="sm" variant={muted ? 'outline' : 'ghost'} onClick={() => setMute(!muted)} title={muted ? 'Reminder sound is muted — tap to turn it on' : 'Mute the reminder sound'} aria-label={muted ? 'Unmute reminders' : 'Mute reminders'}>{muted ? <BellOff className="h-4 w-4 text-red-600" /> : <BellRing className="h-4 w-4" />}</Button>
                 <Button size="sm" variant="ghost" onClick={() => { playChime(); askPopUps().then((ok) => toast(ok ? 'ok' : 'err', ok ? 'Sound and pop-ups are on.' : 'Pop-ups are blocked in this browser; the sound still works.')); }} title="Test sound and allow pop-ups"><Volume2 className="h-4 w-4" /></Button>
                 <Button size="sm" variant="outline" onClick={() => { setAdding(true); setOpen(false); }}><Plus className="h-4 w-4" /> Reminder</Button>
               </div>

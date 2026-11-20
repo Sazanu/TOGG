@@ -9,6 +9,7 @@ import { db } from '../lib/firebase';
 import { initials } from '../lib/format';
 import { can, isGlobal } from '../lib/roles';
 import { useSettingsDoc } from '../lib/settings';
+import { syncOfficeAccess } from '../lib/offices';
 import type { Member } from '../lib/types';
 
 export const DEFAULT_POSITIONS = [
@@ -45,7 +46,7 @@ function MemberPicker({ title, onPick, onClose, exclude = [] }: { title: string;
 
 export default function Leadership() {
   const { profile } = useAuth();
-  const { members, deptTree, cells, branchName, memberById } = useData();
+  const { members, deptTree, cells, branchName, memberById, deptWithChildren } = useData();
   const toast = useToast();
   const nav = useNavigate();
   const positions = usePositions();
@@ -66,14 +67,27 @@ export default function Leadership() {
       setPicking(null);
     } });
   }
-  function setDeptPerson(deptId: string, which: 'head' | 'assistant', m: Member | null) {
+  // Access follows office: the person who gets the office gets the access; the one who leaves it loses it.
+  async function followOffice(before: string | undefined, after: string | undefined, removed: { departmentIds: string[]; cellIds: string[] }) {
+    if (!isGlobal(profile?.role)) return;
+    try {
+      const n = await syncOfficeAccess([before, after], removed);
+      if (n) toast('ok', `Login access updated for ${n} account(s).`);
+    } catch (e) { toast('err', `Office saved, but login access could not be updated: ${errorText(e)}`); }
+  }
+  async function setDeptPerson(deptId: string, which: 'head' | 'assistant', m: Member | null) {
+    const dept = deptTree.find(({ dept: d }) => d.id === deptId)?.dept;
+    const before = which === 'head' ? dept?.headMemberId : dept?.assistantMemberId;
     const data = which === 'head'
       ? { headMemberId: m?.id ?? '', headName: m ? label(m) : '', headPhone: m?.phone ?? '' }
       : { assistantMemberId: m?.id ?? '', assistantName: m ? label(m) : '' };
-    return run(() => updateDoc(doc(db, 'departments', deptId), data), m ? `${label(m)} set as ${which}.` : 'Removed.');
+    await run(() => updateDoc(doc(db, 'departments', deptId), data), m ? `${label(m)} set as ${which}.` : 'Removed.');
+    await followOffice(before, m?.id, { departmentIds: deptWithChildren(deptId), cellIds: [] });
   }
-  function setCellLeader(cellId: string, m: Member | null) {
-    return run(() => updateDoc(doc(db, 'cells', cellId), { leaderMemberId: m?.id ?? '', leaderName: m ? label(m) : '', leaderPhone: m?.phone ?? '' }), m ? `${label(m)} now leads the cell.` : 'Removed.');
+  async function setCellLeader(cellId: string, m: Member | null) {
+    const before = cells.find((c) => c.id === cellId)?.leaderMemberId;
+    await run(() => updateDoc(doc(db, 'cells', cellId), { leaderMemberId: m?.id ?? '', leaderName: m ? label(m) : '', leaderPhone: m?.phone ?? '' }), m ? `${label(m)} now leads the cell.` : 'Removed.');
+    await followOffice(before, m?.id, { departmentIds: [], cellIds: [cellId] });
   }
 
   // Everyone who leads something, with all their roles together.

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { ChevronLeft, ChevronRight, Download, Landmark, Plus, Printer, Settings2, Trash2 } from 'lucide-react';
 import { Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Spinner, Stat, Textarea, cx, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
-import { COLLECTION_LINES, DEFAULT_REMIT, GROUP_LABEL, summarize, weekOf, type RemitSettings, type ReportGroup } from '../lib/collections';
+import { COLLECTION_LINES, DEFAULT_REMIT, lineLabel, remitLines, summarize, weekOf, type RemitSettings } from '../lib/collections';
+import { ExpenseEditor, LineBalanceTable, RemitChooser, expenseProblems } from '../components/Finance';
+import type { Expense } from '../lib/types';
 import { downloadExcel } from '../lib/csv';
 import { db } from '../lib/firebase';
 import { SERVICE_TYPES, isoDate, money, prettyDate, today } from '../lib/format';
@@ -25,6 +28,7 @@ export default function ServiceFinance() {
   const [editing, setEditing] = useState<Collection | 'new' | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const branch = profile?.branchId ?? scope;
+  const nav = useNavigate();
 
   const range = mode === 'week' ? weekOf(anchor) : { start: `${anchor.slice(0, 7)}-01`, end: isoDate(new Date(Number(anchor.slice(0, 4)), Number(anchor.slice(5, 7)), 0)) };
   useEffect(() => {
@@ -39,7 +43,7 @@ export default function ServiceFinance() {
     income: t.income + s.income, expenses: t.expenses + s.expenses, remit: t.remit + s.remit, balance: t.balance + s.balance,
   }), { offering: 0, seed: 0, tithe: 0, projects: 0, pledges: 0, income: 0, expenses: 0, remit: 0, balance: 0 });
   const label = mode === 'week' ? `Week of ${prettyDate(range.start)} – ${prettyDate(range.end)}` : new Date(`${anchor.slice(0, 7)}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  const remitLabel = `${remit.label || `${remit.rate}%`} (${remit.rate}% of ${remit.basis.map((b) => GROUP_LABEL[b].toLowerCase()).join(' + ')})`;
+  const remitLabel = `${remit.label || `${remit.rate}%`} (${remit.rate}% of ${remitLines({}, remit).map((k) => lineLabel(k).toLowerCase()).join(' + ')})`;
 
   function exportXlsx() {
     downloadExcel(`togg-service-finance-${range.start}.xlsx`, [{
@@ -52,7 +56,7 @@ export default function ServiceFinance() {
       name: 'Details',
       rows: rows.flatMap(({ c }) => [
         ...COLLECTION_LINES.filter((l) => c.lines?.[l.key]).map((l) => ({ Date: c.date, Service: c.title || c.serviceType, Item: l.label, Type: 'Income', Amount: c.lines[l.key] })),
-        ...(c.expenses ?? []).map((e) => ({ Date: c.date, Service: c.title || c.serviceType, Item: e.item, Type: 'Expense', Amount: e.amount })),
+        ...(c.expenses ?? []).map((e) => ({ Date: c.date, Service: c.title || c.serviceType, Item: e.item, Type: 'Expense', Amount: e.amount, 'Taken from': lineLabel(e.source), Details: e.details ?? '', 'Paid to': e.paidTo ?? '', 'Approved by': e.approvedBy ?? '' })),
       ]),
     }]);
   }
@@ -91,7 +95,7 @@ export default function ServiceFinance() {
               </tr></thead>
               <tbody>
                 {rows.map(({ c, s }) => (
-                  <tr key={c.id} className="cursor-pointer border-b border-stone-50 hover:bg-stone-50/70" onClick={() => canWrite && setEditing(c)}>
+                  <tr key={c.id} className="cursor-pointer border-b border-stone-50 hover:bg-stone-50/70" onClick={() => nav(`/service-finance/${c.id}`)}>
                     <td className="px-3 py-3"><div className="font-medium text-stone-900">{c.title || c.serviceType}</div><div className="text-xs text-stone-500">{prettyDate(c.date)}{branch === ALL && ` · ${branchName(c.branchId)}`}</div></td>
                     {[s.offering, s.seed, s.tithe, s.projects, s.pledges, s.income, s.expenses, s.remit, s.balance].map((v, i) => <td key={i} className={cx('px-3 py-3 text-right tabular-nums', i === 5 && 'font-semibold', i === 6 && 'text-red-600', i === 8 && 'font-semibold text-emerald-700')}>{v ? v.toLocaleString('en-GH', { minimumFractionDigits: 2 }) : '—'}</td>)}
                   </tr>
@@ -131,7 +135,10 @@ function CollectionForm({ item, remit, onClose }: { item: Collection | null; rem
     if (!d.branchId) { toast('err', 'Choose the branch.'); return; }
     setBusy(true);
     try {
-      const data = { ...d, expenses: d.expenses.filter((x) => x.item.trim() || x.amount).map((x) => ({ item: x.item.trim(), amount: Number(x.amount) || 0 })), recordedBy: profile?.uid ?? '', updatedAt: serverTimestamp() };
+      const clean = { ...d, expenses: cleanExpenses(d.expenses, d.date) };
+      const problem = expenseProblems(clean, remit);
+      if (problem) { toast('err', problem); setBusy(false); return; }
+      const data = { ...clean, remitLines: d.remitLines ?? remitLines(d, remit), recordedBy: profile?.uid ?? '', updatedAt: serverTimestamp() };
       if (item) await updateDoc(doc(db, 'collections', item.id), data); else await addDoc(collection(db, 'collections'), { ...data, createdAt: serverTimestamp() });
       toast('ok', 'Service collection saved.'); onClose();
     } catch (err) { toast('err', errorText(err)); setBusy(false); }
@@ -157,18 +164,22 @@ function CollectionForm({ item, remit, onClose }: { item: Collection | null; rem
           {!sunday && <p className="mt-1 text-xs text-stone-500">Love / kingdom offering, special seed, projects offering, tithe and pledges appear for Sunday Service.</p>}
         </div>
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-stone-800">Expenses paid from this collection</h3>
+          <h3 className="mb-1 text-sm font-semibold text-stone-800">{remit.label || `${remit.rate}%`} — take it from</h3>
+          <p className="mb-2 text-xs text-stone-500">Tap the offerings the {remit.rate}% is taken from at this service (e.g. only Kingdom offering).</p>
+          <RemitChooser c={d} remit={remit} onChange={(remitLines) => setD({ ...d, remitLines })} />
+        </div>
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-stone-800">Expenses — and which offering each one is taken from</h3>
           <div className="space-y-2">
             {d.expenses.map((x, i) => (
-              <div key={i} className="grid grid-cols-[1fr_9rem_2rem] gap-2">
-                <Input value={x.item} onChange={(e) => setD({ ...d, expenses: d.expenses.map((y, j) => (j === i ? { ...y, item: e.target.value } : y)) })} placeholder="e.g. Fuel for generator" />
-                <Input type="number" min={0} step="0.01" value={x.amount || ''} onChange={(e) => setD({ ...d, expenses: d.expenses.map((y, j) => (j === i ? { ...y, amount: Number(e.target.value) } : y)) })} />
-                <button type="button" onClick={() => setD({ ...d, expenses: d.expenses.filter((_, j) => j !== i) })} className="text-stone-400 hover:text-red-600" aria-label="Remove"><Trash2 className="h-4 w-4" /></button>
-              </div>
+              <ExpenseEditor key={i} e={x} c={d} remit={remit}
+                onChange={(e) => setD({ ...d, expenses: d.expenses.map((y, j) => (j === i ? e : y)) })}
+                onRemove={() => setD({ ...d, expenses: d.expenses.filter((_, j) => j !== i) })} />
             ))}
           </div>
-          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => setD({ ...d, expenses: [...d.expenses, { item: '', amount: 0 }] })}><Plus className="h-4 w-4" /> Add expense</Button>
+          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => setD({ ...d, expenses: [...d.expenses, { item: '', amount: 0, source: '', details: '', paidTo: '', approvedBy: '', date: d.date }] })}><Plus className="h-4 w-4" /> Add expense</Button>
         </div>
+        <LineBalanceTable c={d} remit={remit} />
         <div className="grid grid-cols-2 gap-2 rounded-xl bg-stone-50 p-4 text-sm sm:grid-cols-4">
           <div>Total income<br /><b>{money(s.income)}</b></div><div>Expenses<br /><b className="text-red-600">{money(s.expenses)}</b></div>
           <div>{remit.label || `${remit.rate}%`}<br /><b>{money(s.remit)}</b></div><div>Balance<br /><b className="text-emerald-700">{money(s.balance)}</b></div>
@@ -201,11 +212,12 @@ function RemitForm({ s, onClose }: { s: RemitSettings; onClose: () => void }) {
           <Field label="Column name"><Input value={d.label} onChange={(e) => setD({ ...d, label: e.target.value })} placeholder="30%" /></Field>
         </div>
         <div>
-          <span className="mb-2 block text-sm font-medium text-stone-700">Worked out on</span>
+          <span className="mb-2 block text-sm font-medium text-stone-700">Normally taken from (can be changed on each service)</span>
           <div className="flex flex-wrap gap-2">
-            {(Object.keys(GROUP_LABEL) as ReportGroup[]).map((g) => {
-              const on = d.basis.includes(g);
-              return <button type="button" key={g} onClick={() => setD({ ...d, basis: on ? d.basis.filter((x) => x !== g) : [...d.basis, g] })} className={cx('rounded-full border px-3 py-1.5 text-sm', on ? 'border-royal-600 bg-royal-600 text-white' : 'border-stone-300 text-stone-600')}>{GROUP_LABEL[g]}</button>;
+            {COLLECTION_LINES.map((l) => {
+              const cur = d.lines?.length ? d.lines : remitLines({}, d);
+              const on = cur.includes(l.key);
+              return <button type="button" key={l.key} onClick={() => setD({ ...d, lines: on ? cur.filter((x) => x !== l.key) : [...cur, l.key] })} className={cx('rounded-full border px-3 py-1.5 text-sm', on ? 'border-royal-600 bg-royal-600 text-white' : 'border-stone-300 text-stone-600')}>{l.label}</button>;
             })}
           </div>
         </div>
@@ -213,5 +225,65 @@ function RemitForm({ s, onClose }: { s: RemitSettings; onClose: () => void }) {
         <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={onClose}>Cancel</Button><Button type="submit">Save</Button></div>
       </form>
     </Modal>
+  );
+}
+
+export function cleanExpenses(list: Expense[], date: string): Expense[] {
+  return list.filter((x) => x.item.trim() || x.amount).map((x) => ({
+    item: x.item.trim(), amount: Number(x.amount) || 0, source: x.source ?? '', details: (x.details ?? '').trim(),
+    paidTo: (x.paidTo ?? '').trim(), approvedBy: (x.approvedBy ?? '').trim(), date: x.date || date,
+  }));
+}
+
+/** One service's money: every offering, where the 30% and each expense was taken from, and what is left. */
+export function CollectionDetail() {
+  const { id = '' } = useParams();
+  const { profile } = useAuth();
+  const { branchName } = useData();
+  const remit = useSettingsDoc<RemitSettings>('remittance', DEFAULT_REMIT);
+  const [c, setC] = useState<Collection | null | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
+  const canWrite = can(profile?.role, 'giving.write');
+  useEffect(() => onSnapshot(doc(db, 'collections', id), (d) => setC(d.exists() ? ({ id: d.id, ...d.data() } as Collection) : null), () => setC(null)), [id]);
+  if (c === undefined) return <Spinner />;
+  if (c === null) return <Empty icon={<Landmark />} title="Service collection not found"><Link className="underline" to="/service-finance">Service finance</Link></Empty>;
+  const s = summarize(c, remit);
+  return (
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title={c.title || c.serviceType} subtitle={`${prettyDate(c.date)} · ${branchName(c.branchId)}${c.countedBy ? ` · counted by ${c.countedBy}` : ''}`}
+        actions={<>
+          <Button variant="outline" onClick={() => window.print()} className="print:hidden"><Printer className="h-4 w-4" /> Print</Button>
+          {canWrite && <Button onClick={() => setEditing(true)} className="print:hidden">Edit</Button>}
+        </>} />
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Total collected" value={money(s.income)} icon={<Landmark className="h-4 w-4" />} />
+        <Stat label={remit.label || `${remit.rate}%`} value={money(s.remit)} sub={`from ${remitLines(c, remit).filter((k) => Number(c.lines?.[k])).map(lineLabel).join(', ') || '—'}`} />
+        <Stat label="Expenses" value={money(s.expenses)} sub={`${(c.expenses ?? []).length} item(s)`} />
+        <Stat label="Balance" value={money(s.balance)} />
+      </div>
+      <Card className="mb-6 p-5">
+        <h2 className="mb-3 font-semibold text-stone-900">Each offering — what was taken from it and what is left</h2>
+        <LineBalanceTable c={c} remit={remit} />
+      </Card>
+      <Card>
+        <div className="border-b border-stone-100 px-5 py-3"><h2 className="font-semibold text-stone-900">Expenses</h2></div>
+        {(c.expenses ?? []).length === 0 ? <p className="px-5 py-6 text-sm text-stone-500">No expenses from this service.</p> : (
+          <ul className="divide-y divide-stone-100">
+            {c.expenses.map((e, i) => (
+              <li key={i} className="flex flex-wrap items-start gap-3 px-5 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-stone-900">{e.item}</div>
+                  <div className="text-xs text-stone-500">Taken from <b className="text-stone-700">{lineLabel(e.source)}</b>{e.paidTo && ` · paid to ${e.paidTo}`}{e.approvedBy && ` · approved by ${e.approvedBy}`}</div>
+                  {e.details && <div className="mt-1 text-xs text-stone-600">{e.details}</div>}
+                </div>
+                <span className="font-semibold text-red-600">{money(e.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+      {c.notes && <p className="mt-4 text-sm text-stone-600">Notes: {c.notes}</p>}
+      {editing && <CollectionForm item={c} remit={remit} onClose={() => setEditing(false)} />}
+    </div>
   );
 }

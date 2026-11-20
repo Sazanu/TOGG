@@ -448,6 +448,49 @@ await t('Head Pastor sets security; others read it', async () => {
   await assertFails(setDoc(doc(db('bpA'), 'settings/security'), { idleMinutes: 0 }));
 });
 
+
+console.log('Granted areas, cell leaders texting their cell');
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const d = ctx.firestore();
+  await setDoc(doc(d, 'users/ushGrant'), { ...base, role: 'usher', branchId: 'A', active: true, granted: ['finance', 'sms'] });
+  await setDoc(doc(d, 'users/ushRev'), { ...base, role: 'usher', branchId: 'A', active: true, granted: ['finance'], revoked: ['finance'] });
+  await setDoc(doc(d, 'users/cl1'), { ...base, role: 'cell_leader', branchId: 'A', active: true, cellIds: ['cellX'] });
+  await setDoc(doc(d, 'cells/cellX'), { name: 'Zongo', branchId: 'A', leaderMemberId: 'm1' });
+  await setDoc(doc(d, 'members/cm1'), { ...member('A'), cellId: 'cellX', phone: '0241111111' });
+  await setDoc(doc(d, 'members/cm2'), { ...member('A'), cellId: 'cellY', phone: '0242222222' });
+});
+await t('usher given Money can read their branch giving; not another branch', async () => {
+  await assertSucceeds(getDocs(query(collection(db('ushGrant'), 'giving'), where('branchId', '==', 'A'))));
+  await assertFails(getDocs(query(collection(db('ushGrant'), 'giving'), where('branchId', '==', 'B'))));
+});
+await t('usher given SMS can queue a branch message', () => assertSucceeds(addDoc(collection(db('ushGrant'), 'smsMessages'), sms({ label: 'granted' }))));
+await t('a switched-off area beats a granted one', () => assertFails(getDocs(query(collection(db('ushRev'), 'giving'), where('branchId', '==', 'A')))));
+await t('plain usher still cannot read giving', () => assertFails(getDocs(query(collection(db('ushA'), 'giving'), where('branchId', '==', 'A')))));
+await t('cell leader lists only their own cell members', async () => {
+  await assertSucceeds(getDocs(query(collection(db('cl1'), 'members'), where('cellId', '==', 'cellX'), where('branchId', '==', 'A'))));
+  await assertFails(getDocs(query(collection(db('cl1'), 'members'), where('cellId', '==', 'cellY'), where('branchId', '==', 'A'))));
+});
+const cellSms = (o = {}) => sms({ audience: { type: 'cell', cellId: 'cellX', branchId: 'A', includeVisitors: true }, label: 'cell', createdBy: 'cl1', ...o });
+await t('cell leader can text their own cell', async () => {
+  const r = await assertSucceeds(addDoc(collection(db('cl1'), 'smsMessages'), cellSms()));
+  await assertSucceeds(updateDoc(r, { status: 'sending', via: 'app', claimedBy: 'cl1', startedAt: serverTimestamp() }));
+  await assertSucceeds(updateDoc(r, { status: 'sent', provider: 'gonlinesites', recipientsCount: 1, sentCount: 1, failedCount: 0, finishedAt: serverTimestamp() }));
+});
+await t('cell leader cannot text another cell, the branch or a custom list', async () => {
+  await assertFails(addDoc(collection(db('cl1'), 'smsMessages'), cellSms({ audience: { type: 'cell', cellId: 'cellY', branchId: 'A' } })));
+  await assertFails(addDoc(collection(db('cl1'), 'smsMessages'), sms({ label: 'branch' })));
+  await assertFails(addDoc(collection(db('cl1'), 'smsMessages'), sms({ audience: { type: 'custom', phones: ['0241'], branchId: 'A' } })));
+});
+await t('cell leader can read the sending key; a plain usher cannot', async () => {
+  await assertSucceeds(getDoc(doc(db('cl1'), 'smsSender/gonline')));
+  await assertFails(getDoc(doc(db('ushA'), 'smsSender/gonline')));
+});
+await t('Super Admin updates office access on a linked account', () => assertSucceeds(updateDoc(doc(db('head'), 'users/cl1'), { memberId: 'm1', cellIds: [], officeCellIds: [], departmentIds: ['media'], officeDepartmentIds: ['media'] })));
+await t('a person cannot give themselves access', async () => {
+  await assertFails(updateDoc(doc(db('ushA'), 'users/ushA'), { granted: ['finance'] }));
+  await assertFails(updateDoc(doc(db('cl1'), 'users/cl1'), { cellIds: ['cellY'] }));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup();
 process.exit(fail ? 1 : 0);

@@ -120,8 +120,20 @@ let revoked = new Set<string>();
 let extras = new Set<Capability>();
 const DEPT_CAPS: Capability[] = ['members.read', 'members.list', 'members.add', 'reports.view', 'departments.view', 'prayer.view'];
 const CELL_CAPS: Capability[] = ['members.read', 'cells.view', 'prayer.view'];
-export function setUserExtras(p: { departmentIds?: string[]; cellIds?: string[] } | null) {
-  extras = new Set<Capability>([...((p?.departmentIds?.length ?? 0) > 0 ? DEPT_CAPS : []), ...((p?.cellIds?.length ?? 0) > 0 ? CELL_CAPS : [])]);
+/** Areas that can be GIVEN to a person on top of their role (their own branch). Keep in sync with granted() in firestore.rules. */
+export const GRANTABLE: Area[] = ['members', 'attendance', 'finance', 'cells', 'sms'];
+const GRANT_CAPS: Partial<Record<Area, Capability[]>> = {
+  members: ['members.read', 'members.list', 'members.write', 'members.add', 'registrations.manage'],
+  attendance: ['members.read', 'attendance.write'],
+  finance: ['members.read', 'giving.read', 'giving.write'],
+  cells: ['members.read', 'cells.view', 'cells.manage'],
+  sms: ['sms.send'],
+};
+export function setUserExtras(p: { departmentIds?: string[]; cellIds?: string[]; granted?: string[] } | null) {
+  extras = new Set<Capability>([
+    ...((p?.departmentIds?.length ?? 0) > 0 ? DEPT_CAPS : []), ...((p?.cellIds?.length ?? 0) > 0 ? CELL_CAPS : []),
+    ...(p?.granted ?? []).flatMap((a) => GRANT_CAPS[a as Area] ?? []),
+  ]);
 }
 /** Roles that already see a whole branch. */
 export const BRANCH_WIDE: Role[] = ['branch_pastor', 'secretary', 'finance', 'usher'];

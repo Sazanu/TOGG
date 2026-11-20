@@ -40,6 +40,15 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 - **Cell leaders' log book**, following the TOGG paper form: the member list, CM / UCV / ECV status, weekly ticks for cell meetings, Sunday services and weekday services, and the weekly meeting table (date, attendance, offering) with average and total rows. It can be printed.
 - **Notification bell** for everyone: personal reminders, the Head Pastor's attention items, new prayer requests and reports to review. It **plays a sound and shows a pop-up** when something new arrives, like WhatsApp Web.
 
+### Expenses, offices and access
+- **Expenses & offerings page:** every expense records which service's offering it was taken from (e.g. Kingdom offering of Sunday 16th), plus the details, who was paid and who approved it. An offering can't be overspent. Each service also records which offerings the **30%** comes from. A table shows, for each offering, collected − 30% − expenses = left. Service finance rows open a details page.
+- **Access follows office:** link a login to the person's member record (Users → *Linked member record*, or *Login access* from Leadership). The departments they head and the cells they lead then give access automatically. When the office passes to someone else, that access is removed.
+- **Extra access:** besides switching areas off, the Super Admin can now *also give* Attendance, Money, Members, Cells or SMS to a person for their own branch.
+- **Cell leaders** can *Text my cell* and *Write meeting report* from their cell page.
+- **Sender ID** is chosen from the IDs Gonlinesites has approved (TOGG). A new one is added only after Gonlinesites approves it, because an unapproved ID is silently refused.
+- **Reminders** ring every minute (the Head Pastor can change this) until done, snoozed or muted with the bell's mute button.
+- **Page not found** has Back and Home buttons. The build also writes `404.html` and real folders for the public pages, so every host opens the app.
+
 ### SMS, speed and safety
 - **SMS goes straight to Gonlinesites from the app.** Paste the API key (or the whole API link) under *SMS messages → SMS provider*, use an approved Sender ID (**TOGG**), and press *Send test SMS*. Each message is claimed once, so two open screens never send it twice. Scheduled messages go out from any open screen of someone allowed to send SMS. Automatic messages still use the optional Apps Script server.
 - **Automatic sign-out** when the app is left unattended, with a one-minute warning. The Head Pastor sets the time under *Payments & links → Security & reminders*.

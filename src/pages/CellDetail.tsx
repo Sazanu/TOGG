@@ -1,11 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { collection, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
-import { ClipboardPlus, Home, Pencil, Plus, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
+import { ClipboardPlus, Home, MessageSquare, Send, Pencil, Plus, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Stat, Textarea, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
+import { queueSms } from '../lib/sms';
 import { initials, money, prettyDate, today } from '../lib/format';
 import { can } from '../lib/roles';
 import type { Cell, CellReport, NewContact } from '../lib/types';
@@ -29,6 +30,7 @@ export default function CellDetail() {
   const [reporting, setReporting] = useState<CellReport | null | 'new'>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [texting, setTexting] = useState(false);
 
   const reports = useCellReports(cell?.branchId ?? '', '2000-01-01', '2999-12-31', cell ? [id] : []);
   const sorted = [...reports].sort((a, b) => b.date.localeCompare(a.date));
@@ -49,7 +51,8 @@ export default function CellDetail() {
         actions={
           <>
             {canEditCell && <Button variant="outline" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /> Edit</Button>}
-
+            {canReport && <Button variant="outline" onClick={() => setTexting(true)}><MessageSquare className="h-4 w-4" /> Text my cell</Button>}
+            {canReport && <Button variant="gold" onClick={() => setReporting('new')}><ClipboardPlus className="h-4 w-4" /> Write meeting report</Button>}
           </>
         }
       />
@@ -61,8 +64,8 @@ export default function CellDetail() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <Card className="lg:col-span-3">
-          <div className="border-b border-stone-100 px-5 py-4"><h2 className="font-semibold text-stone-900">Earlier meeting reports</h2></div>
-          {sorted.length === 0 ? <Empty icon={<ClipboardPlus />} title="No reports yet">Weekly reports are now kept in the log book above.</Empty> : (
+          <div className="border-b border-stone-100 px-5 py-4"><h2 className="font-semibold text-stone-900">Meeting reports</h2></div>
+          {sorted.length === 0 ? <Empty icon={<ClipboardPlus />} title="No reports yet">Tick attendance in the log book above, and use “Write meeting report” for the topic, testimonies, offering and new contacts.</Empty> : (
             <ul className="divide-y divide-stone-100">
               {sorted.map((r) => (
                 <li key={r.id} className="px-5 py-4">
@@ -109,6 +112,7 @@ export default function CellDetail() {
         </Card>
       </div>
 
+      {texting && <TextCell cell={cell} count={inCell.filter((m) => m.phone).length} onClose={() => setTexting(false)} />}
       {reporting && <CellReportForm cell={cell} report={reporting === 'new' ? null : reporting} canDelete={canManage} onClose={() => setReporting(null)} />}
       {editing && <CellForm cell={cell} onClose={() => setEditing(false)} />}
       {adding && <AddToCell cell={cell} onClose={() => setAdding(false)} />}
@@ -262,5 +266,31 @@ function CellMonthStats({ cell, members }: { cell: Cell; members: number }) {
       <Stat label="Offering this month" value={money(t?.offering ?? 0)} />
       <Stat label="Converts this month" value={(t?.UCV ?? 0) + (t?.ECV ?? 0)} sub={t ? `${t.UCV} UCV · ${t.ECV} ECV · ${t.CM} CM` : undefined} />
     </div>
+  );
+}
+
+/** Cell leader texts the members of their cell (SMS via Gonlinesites). */
+function TextCell({ cell, count, onClose }: { cell: Cell; count: number; onClose: () => void }) {
+  const { profile } = useAuth();
+  const toast = useToast();
+  const [text, setText] = useState(`Hello {firstName}, reminder: our ${cell.name} meeting is on ${cell.meetingDay} at ${cell.meetingTime}${cell.location ? ` at ${cell.location}` : ''}. See you there! - {church}`);
+  const [busy, setBusy] = useState(false);
+  async function send(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await queueSms({ branchId: cell.branchId, message: text.trim(), audience: { type: 'cell', cellId: cell.id, branchId: cell.branchId, includeVisitors: true }, label: `${cell.name} — cell message`, createdBy: profile?.uid, createdByName: profile?.displayName, estimate: count });
+      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Message sent to your cell members.' : `Not sent: ${r.error ?? ''}`);
+      if (r.delivered) onClose();
+    } catch (err) { toast('err', errorText(err)); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title={`Text ${cell.name}`}>
+      <form onSubmit={send} className="space-y-4">
+        <p className="text-sm text-stone-600">Goes to the {count} member(s) of this cell with a phone number. {'{firstName}'} becomes each person's name.</p>
+        <Textarea rows={5} required maxLength={900} value={text} onChange={(e) => setText(e.target.value)} />
+        <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={onClose}>Cancel</Button><Button type="submit" loading={busy} disabled={!count}><Send className="h-4 w-4" /> Send SMS</Button></div>
+      </form>
+    </Modal>
   );
 }

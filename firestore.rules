@@ -33,13 +33,15 @@ service cloud.firestore {
     function myCells() { return me().get('cellIds', []); }
     function cellData(id) { return get(/databases/$(database)/documents/cells/$(id)).data; }
 
-    function canReadMembers(b)  { return hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher']) && allowed('members'); }
-    function canWriteMembers(b) { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('members'); }
-    function canAttendance(b)   { return hasRole(b, ['branch_pastor', 'secretary', 'usher']) && allowed('attendance'); }
-    function canGiving(b)       { return hasRole(b, ['branch_pastor', 'finance']) && allowed('finance'); }
-    function canSignups(b)      { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('members'); }
-    function canCells(b)        { return hasRole(b, ['branch_pastor', 'secretary']) && allowed('cells'); }
-    function canSms(b)          { return (isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary']))) && allowed('sms'); }
+    // Extra areas the Super Admin gave this person on top of their role (in their own branch only).
+    function granted(b, area)   { return signedIn() && area in me().get('granted', []) && b is string && me().branchId == b && activeUser() && allowed(area); }
+    function canReadMembers(b)  { return (hasRole(b, ['branch_pastor', 'secretary', 'finance', 'usher']) && allowed('members')) || granted(b, 'members') || granted(b, 'attendance') || granted(b, 'finance'); }
+    function canWriteMembers(b) { return (hasRole(b, ['branch_pastor', 'secretary']) && allowed('members')) || granted(b, 'members'); }
+    function canAttendance(b)   { return (hasRole(b, ['branch_pastor', 'secretary', 'usher']) && allowed('attendance')) || granted(b, 'attendance'); }
+    function canGiving(b)       { return (hasRole(b, ['branch_pastor', 'finance']) && allowed('finance')) || granted(b, 'finance'); }
+    function canSignups(b)      { return (hasRole(b, ['branch_pastor', 'secretary']) && allowed('members')) || granted(b, 'members'); }
+    function canCells(b)        { return (hasRole(b, ['branch_pastor', 'secretary']) && allowed('cells')) || granted(b, 'cells'); }
+    function canSms(b)          { return ((isGlobal() || (b is string && hasRole(b, ['branch_pastor', 'secretary']))) && allowed('sms')) || granted(b, 'sms'); }
     // Leading a cell or a department gives access to it whatever the person's main role is (no conflicts).
     function myCell(b, cellId)  { return activeUser() && me().branchId == b && allowed('cells') && cellId in myCells(); }
     function myDeptMember(d)    { return activeUser() && me().branchId == d.branchId && allowed('members') && d.departmentIds.hasAny(myDepts()); }
@@ -110,7 +112,7 @@ service cloud.firestore {
 
       allow update: if isGlobal() && request.auth.uid != uid
         && validAccess(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active', 'revoked'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'branchId', 'departmentIds', 'cellIds', 'active', 'revoked', 'granted', 'memberId', 'officeDepartmentIds', 'officeCellIds'])
         && (isHead() || !(resource.data.role in ['head_pastor', 'associate_pastor']));
 
       allow delete: if isHead() && request.auth.uid != uid;
@@ -311,13 +313,18 @@ service cloud.firestore {
 
     // ---------- SMS ----------
     match /smsMessages/{id} {
-      allow read: if canSms(resource.data.branchId);
-      allow create: if canSms(request.resource.data.branchId)
+      // A cell leader may text the members of their own cell (and nobody else).
+      function cellMsg(d) {
+        return d.audience.type == 'cell' && d.audience.get('cellId', '') is string
+          && d.audience.get('branchId', '') == d.branchId && myCell(d.branchId, d.audience.cellId);
+      }
+      allow read: if canSms(resource.data.branchId) || cellMsg(resource.data);
+      allow create: if (canSms(request.resource.data.branchId) || cellMsg(request.resource.data))
         && request.resource.data.status in ['queued', 'scheduled']
         && request.resource.data.kind in ['instant', 'scheduled']
         && request.resource.data.message is string && request.resource.data.message.size() > 0 && request.resource.data.message.size() <= 918
         && (isGlobal() || request.resource.data.audience.branchId == request.resource.data.branchId);
-      allow update: if canSms(resource.data.branchId) && (
+      allow update: if (canSms(resource.data.branchId) || cellMsg(resource.data)) && (
         // cancel a scheduled message
         (resource.data.status == 'scheduled' && request.resource.data.status == 'cancelled'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
@@ -435,7 +442,7 @@ service cloud.firestore {
 
     // Gonlinesites key used by the app itself to send SMS: only staff who may send SMS can read it.
     match /smsSender/{id} {
-      allow read: if canSms(me().get('branchId', null));
+      allow read: if canSms(me().get('branchId', null)) || (activeUser() && allowed('cells') && myCells().size() > 0);
       allow write: if isGlobal();
     }
 

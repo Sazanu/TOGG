@@ -10,7 +10,7 @@ const last = (fallback: number) => { try { return Number(localStorage.getItem(KE
 
 /** Head Pastor's security settings (settings/security). */
 export interface SecuritySettings { idleMinutes: number; reminderRepeatMinutes: number }
-export const DEFAULT_SECURITY: SecuritySettings = { idleMinutes: 20, reminderRepeatMinutes: 15 };
+export const DEFAULT_SECURITY: SecuritySettings = { idleMinutes: 20, reminderRepeatMinutes: 1 };
 
 export function useSecuritySettings(): SecuritySettings {
   const [s, setS] = useState(DEFAULT_SECURITY);
