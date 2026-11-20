@@ -130,6 +130,17 @@ t('Gonlinesites: an error reply is recorded as failed, with the reason', () => {
   eq(m2.status, 'failed');
   providerReply = '{"status":"success"}';
 });
+t('Gonlinesites JSON replies: "ok" is sent, numbered codes are failures with the reason', () => {
+  reset(); put('settings/sms', { provider: 'gonlinesites', senderId: 'TOGG', churchName: 'TOGG' }); put('secrets/sms', { apiKey: 'TESTKEY==' });
+  providerReply = '{"code":"ok","message":"Successfully Send","balance":569}';
+  eq(send({ branchId: null, message: 'a', audience: { type: 'custom', phones: ['0241234567'] } }).status, 'sent');
+  providerReply = '{"code":"106","message":"Invalid Sender id"}';
+  const m = send({ branchId: null, message: 'b', audience: { type: 'custom', phones: ['0241234567'] } });
+  eq(m.status, 'failed'); if (!/Invalid Sender id/.test(m.error)) throw new Error('reason missing: ' + m.error);
+  providerReply = '{"code":"112","message":"Destination number contain in blacklist number"}';
+  eq(send({ branchId: null, message: 'c', audience: { type: 'custom', phones: ['0241234567'] } }).status, 'failed');
+  providerReply = '{"status":"success"}';
+});
 console.log('Paystack online giving');
 const ok = (ref, pesewas, extra = {}) => ({ status: true, message: 'Verification successful', data: { status: 'success', reference: ref, amount: pesewas, currency: 'GHS', channel: 'mobile_money', paid_at: '2026-11-22T09:15:00.000Z', fees: 195, ...extra } });
 const gift = (id, o) => put(`onlineGifts/${id}`, { purpose: 'tithe', projectId: '', branchId: 'A', name: 'Ama', phone: '024 111 1111', phoneKey: '241111111', email: '', amount: 100, currency: 'GHS', status: 'pending', createdAt: new Date(), ...o });

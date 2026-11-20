@@ -40,6 +40,12 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 - **Cell leaders' log book**, following the TOGG paper form: the member list, CM / UCV / ECV status, weekly ticks for cell meetings, Sunday services and weekday services, and the weekly meeting table (date, attendance, offering) with average and total rows. It can be printed.
 - **Notification bell** for everyone: personal reminders, the Head Pastor's attention items, new prayer requests and reports to review. It **plays a sound and shows a pop-up** when something new arrives, like WhatsApp Web.
 
+### SMS, speed and safety
+- **SMS goes straight to Gonlinesites from the app.** Paste the API key (or the whole API link) under *SMS messages → SMS provider*, use an approved Sender ID (**TOGG**), and press *Send test SMS*. Each message is claimed once, so two open screens never send it twice. Scheduled messages go out from any open screen of someone allowed to send SMS. Automatic messages still use the optional Apps Script server.
+- **Automatic sign-out** when the app is left unattended, with a one-minute warning. The Head Pastor sets the time under *Payments & links → Security & reminders*.
+- **Reminders keep ringing** at the interval the Head Pastor sets until they are marked done.
+- **Back button** on every page. **Faster start-up:** pages and the Excel library load only when needed.
+
 ### Attendance and online giving
 - **Check-in station** (Attendance → *Open check-in station*): a full-screen page for a tablet or laptop at the door. Type a few letters of a name or phone number and tap the person; it chimes. There is a one-tap form for first-time visitors and a head-count for guests who aren't named. **Undo** is beside every name.
 - **QR self check-in:** the station shows a QR code. Members scan it, type their phone number, and are checked in automatically. A phone the system doesn't know appears on the station with *Add as visitor* or *Find by name*.

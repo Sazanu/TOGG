@@ -13,7 +13,12 @@
 var PROJECT_ID = 'attendanceform-cdb69';
 var LOG_SENT = []; // test mode ('log' provider) records here
 // Words in a Gonlinesites reply that mean the SMS was NOT sent.
-var GONLINE_ERROR = /error|invalid|insufficient|fail|denied|wrong|incorrect|not ?allowed|unauthori[sz]ed|low balance/i;
+var GONLINE_ERROR = /error|invalid|insufficient|fail|denied|wrong|incorrect|not ?allowed|unauthori[sz]ed|low balance|blacklist/i;
+// Gonlinesites replies in JSON: {"code":"ok",…} when accepted, {"code":"106","message":"Invalid Sender id"} etc. when not.
+function gonlineOk_(body) {
+  try { var j = JSON.parse(body); var c = String(j.code !== undefined ? j.code : (j.status || '')).toLowerCase(); return c === 'ok' || c === 'success' || c === '200' || c === '1000'; }
+  catch (e) { return String(body).trim().length > 0 && !GONLINE_ERROR.test(body); }
+}
 
 /* ---------------- Firestore REST ---------------- */
 function props_() { return PropertiesService.getScriptProperties(); }
@@ -180,7 +185,7 @@ function provider_(settings) {
     try { res = UrlFetchApp.fetch('https://sms.gonlinesites.com/app/sms/api?' + q, { muteHttpExceptions: true }); }
     catch (e) { res = UrlFetchApp.fetch('http://sms.gonlinesites.com/app/sms/api?' + q, { muteHttpExceptions: true }); }
     var body = res.getContentText();
-    if (res.getResponseCode() < 300 && !GONLINE_ERROR.test(body)) return { sent: to.length, failed: 0, response: body.slice(0, 300) };
+    if (res.getResponseCode() < 300 && gonlineOk_(body)) return { sent: to.length, failed: 0, response: body.slice(0, 300) };
     return { sent: 0, failed: to.length, error: 'Gonlinesites ' + res.getResponseCode() + ': ' + body.slice(0, 200) };
   } };
   if (p === 'hubtel') {

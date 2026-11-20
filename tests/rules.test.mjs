@@ -413,6 +413,41 @@ await t('settings/server: public read, only Super Admin writes', async () => {
   await assertFails(setDoc(doc(anon(), 'settings/server'), { relayUrl: 'https://evil' }));
 });
 
+
+console.log('SMS sent from the app (Gonlinesites)');
+await t('Super Admin saves the app sending key', () => assertSucceeds(setDoc(doc(db('head'), 'smsSender/gonline'), { apiKey: 'K', senderId: 'TOGG' })));
+await t('SMS staff can read the sending key; others and the public cannot', async () => {
+  await assertSucceeds(getDoc(doc(db('bpA'), 'smsSender/gonline')));
+  await assertSucceeds(getDoc(doc(db('secA'), 'smsSender/gonline')));
+  await assertFails(getDoc(doc(db('finA'), 'smsSender/gonline')));
+  await assertFails(getDoc(doc(db('ushA'), 'smsSender/gonline')));
+  await assertFails(getDoc(doc(anon(), 'smsSender/gonline')));
+  await assertFails(setDoc(doc(db('bpA'), 'smsSender/gonline'), { apiKey: 'X', senderId: 'X' }));
+});
+await env.withSecurityRulesDisabled(async (ctx) => {
+  const d = ctx.firestore();
+  await setDoc(doc(d, 'smsMessages/q1'), { branchId: 'A', message: 'Hi', audience: { type: 'custom', phones: ['0241234567'] }, kind: 'instant', status: 'queued', label: 'x' });
+  await setDoc(doc(d, 'smsMessages/q2'), { branchId: 'A', message: 'Hi', audience: { type: 'custom' }, kind: 'scheduled', status: 'scheduled', sendAt: Timestamp.fromMillis(Date.now() + 86400000), label: 'later' });
+});
+await t('branch pastor claims a queued message for themselves', () => assertSucceeds(updateDoc(doc(db('bpA'), 'smsMessages/q1'), { status: 'sending', via: 'app', claimedBy: 'bpA', startedAt: serverTimestamp() })));
+await t('cannot claim it again, or record someone else\'s claim', async () => {
+  await assertFails(updateDoc(doc(db('secA'), 'smsMessages/q1'), { status: 'sending', via: 'app', claimedBy: 'secA', startedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(db('secA'), 'smsMessages/q1'), { status: 'sent', sentCount: 1 }));
+});
+await t('claimer records the result', () => assertSucceeds(updateDoc(doc(db('bpA'), 'smsMessages/q1'), { status: 'sent', provider: 'gonlinesites', recipientsCount: 1, sentCount: 1, failedCount: 0, providerResponse: 'ok', finishedAt: serverTimestamp() })));
+await t('a sent message cannot be reopened or edited', () => assertFails(updateDoc(doc(db('bpA'), 'smsMessages/q1'), { status: 'queued' })));
+await t('a scheduled message cannot be claimed before its time', () => assertFails(updateDoc(doc(db('bpA'), 'smsMessages/q2'), { status: 'sending', via: 'app', claimedBy: 'bpA', startedAt: serverTimestamp() })));
+await t('claiming cannot change the message text', () => assertFails(updateDoc(doc(db('bpA'), 'smsMessages/q2'), { status: 'cancelled', message: 'changed' })));
+await t('other branch cannot claim', async () => {
+  await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'smsMessages/q3'), { branchId: 'A', message: 'Hi', audience: { type: 'custom' }, kind: 'instant', status: 'queued', label: 'x' }));
+  await assertFails(updateDoc(doc(db('ushB'), 'smsMessages/q3'), { status: 'sending', via: 'app', claimedBy: 'ushB', startedAt: serverTimestamp() }));
+});
+await t('Head Pastor sets security; others read it', async () => {
+  await assertSucceeds(setDoc(doc(db('head'), 'settings/security'), { idleMinutes: 20, reminderRepeatMinutes: 15 }));
+  await assertSucceeds(getDoc(doc(db('ushA'), 'settings/security')));
+  await assertFails(setDoc(doc(db('bpA'), 'settings/security'), { idleMinutes: 0 }));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup();
 process.exit(fail ? 1 : 0);

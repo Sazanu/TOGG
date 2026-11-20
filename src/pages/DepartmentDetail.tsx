@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, HeartHandshake, Network, Pencil, Plus, RefreshCw, UsersRound } from 'lucide-react';
+import { HeartHandshake, Network, Pencil, Plus, RefreshCw, UsersRound } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { withAutoDepts } from '../lib/autoDepts';
 import { errorText, useToast } from '../components/ui';
@@ -52,7 +52,6 @@ export default function DepartmentDetail() {
 
   return (
     <div>
-      <Link to="/departments" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> Departments</Link>
       <PageHeader
         title={dept.name}
         subtitle={parent ? `Under ${parent.name}` : 'Main department'}

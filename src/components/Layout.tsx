@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Suspense, useState, type ReactNode } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import {
   Activity, Building2, Crown, Landmark, CalendarCheck, ClipboardList, CreditCard, Database, HandCoins, HandHeart, Hammer, HeartHandshake, Home, Inbox, LayoutDashboard, LogOut, Menu, MessageCircleHeart, MessageSquare, Network, ShieldCheck, Users, Wallet, X,
 } from 'lucide-react';
@@ -7,9 +8,10 @@ import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
 import { ROLE_LABELS, can, type Capability } from '../lib/roles';
 import { Logo } from './Logo';
-import { Avatar, cx } from './ui';
+import { Avatar, Spinner, cx } from './ui';
 import { useCanCharity } from '../pages/Charity';
 import { NotificationBell } from './Notifications';
+import { SmsPump } from './SmsPump';
 
 interface NavItem { to: string; label: string; icon: ReactNode; cap?: Capability; section: string; charity?: boolean }
 
@@ -131,9 +133,28 @@ export function Layout() {
           <NotificationBell />
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <Outlet />
+          <BackButton />
+          <Suspense fallback={<Spinner />}><Outlet /></Suspense>
+          <SmsPump />
         </main>
       </div>
     </div>
+  );
+}
+
+/** Back to the previous page (or one level up when the page was opened directly, e.g. from a link). */
+function BackButton() {
+  const { pathname } = useLocation();
+  const nav = useNavigate();
+  if (pathname === '/') return null;
+  const back = () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) nav(-1);
+    else nav(pathname.split('/').slice(0, -1).join('/') || '/');
+  };
+  return (
+    <button onClick={back} className="mb-3 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-stone-500 hover:bg-stone-100 hover:text-royal-700 print:hidden">
+      <ArrowLeft className="h-4 w-4" /> Back
+    </button>
   );
 }

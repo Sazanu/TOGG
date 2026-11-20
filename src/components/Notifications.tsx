@@ -12,6 +12,7 @@ import type { Reminder } from '../lib/types';
 import { usePrayerRequests } from '../pages/Prayer';
 import { useMonthReports } from '../pages/Reports';
 import { Button, Field, Input, Modal, Textarea, cx, errorText, useToast } from './ui';
+import { useSecuritySettings } from './IdleLogout';
 
 interface Item { id: string; kind: 'reminder' | 'pastoral' | 'prayer' | 'report'; title: string; detail: string; link: string; reminderId?: string; noteId?: string }
 
@@ -71,6 +72,21 @@ export function NotificationBell({ light }: { light?: boolean }) {
     }
     first.current = false;
   }, [items, nav]);
+
+  // Keep ringing for due reminders (and the Head Pastor's attention items) at the interval the Head Pastor set.
+  const { reminderRepeatMinutes } = useSecuritySettings();
+  const urgent = items.filter((i) => i.kind === 'reminder' || i.kind === 'pastoral');
+  const urgentRef = useRef(urgent); urgentRef.current = urgent;
+  useEffect(() => {
+    if (!reminderRepeatMinutes || reminderRepeatMinutes <= 0) return;
+    const t = setInterval(() => {
+      const u = urgentRef.current;
+      if (!u.length) return;
+      playChime();
+      popUp(u.length === 1 ? `Reminder: ${u[0].title}` : `${u.length} reminders waiting`, u.length === 1 ? u[0].detail : u.slice(0, 3).map((x) => x.title).join(' · '), () => u[0].link && nav(u[0].link));
+    }, reminderRepeatMinutes * 60_000);
+    return () => clearInterval(t);
+  }, [reminderRepeatMinutes, nav]);
 
   async function done(i: Item) {
     try {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { addDoc, collection, deleteDoc, doc, getDoc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { BellRing, CalendarClock, History, KeyRound, MessageSquare, Pencil, Plus, Send, Settings2, Trash2, Wand2 } from 'lucide-react';
@@ -8,7 +8,7 @@ import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import { DAYS, SERVICE_TYPES, prettyDate, smsParts } from '../lib/format';
 import { isGlobal } from '../lib/roles';
-import { DEFAULT_SMS_SETTINGS, TEMPLATES, estimateRecipients, queueSms } from '../lib/sms';
+import { DEFAULT_SMS_SETTINGS, TEMPLATES, estimateRecipients, isServerUrl, queueSms } from '../lib/sms';
 import type { Audience, AudienceType, MemberCategory, Programme, SmsMessage, SmsSettings } from '../lib/types';
 
 type Tab = 'send' | 'history' | 'reminders' | 'auto' | 'settings';
@@ -451,27 +451,28 @@ function ProviderSettings() {
   const [keySet, setKeySet] = useState<boolean | null>(null);
   const [testTo, setTestTo] = useState('');
   const [testing, setTesting] = useState(false);
-  useEffect(() => { if (s && !d) setD(s); }, [s, d]);
+  useEffect(() => { if (s && !d) setD({ ...s, provider: s.provider === 'log' ? 'log' : 'gonlinesites', relayUrl: isServerUrl(s.relayUrl ?? '') ? s.relayUrl : '' }); }, [s, d]);
   useEffect(() => { getDoc(doc(db, 'settings', 'smsKeyStatus')).then((x) => setKeySet(!!x.data()?.set)).catch(() => setKeySet(null)); }, []);
-  const hint = useMemo(() => ({
-    gonlinesites: 'Gonlinesites: paste the api_key from your Gonlinesites SMS panel (the long code in your API link). Your Sender ID must be approved by Gonlinesites.',
-    arkesel: 'Arkesel: sms.arkesel.com → Dashboard → API Keys. Sender ID must be approved by Arkesel.',
-    mnotify: 'mNotify: apps.mnotify.net → API → copy your API key. Register your Sender ID first.',
-    hubtel: 'Hubtel: paste as clientId:clientSecret from your Hubtel API keys.',
-    log: 'Test mode: nothing is really sent. Messages are only recorded (good for trying the system).',
-  }), []);
   if (!d) return <Spinner />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    const relay = (d!.relayUrl ?? '').trim();
+    if (relay && !isServerUrl(relay)) { toast('err', 'That box is only for a Google Apps Script address (https://script.google.com/…). Leave it empty — the app sends to Gonlinesites itself. Put your Gonlinesites key in "API key".'); return; }
+    // Accept the whole Gonlinesites link too: take the api_key out of it.
+    let key = apiKey.trim();
+    const m = key.match(/[?&]api_key=([^&\s]+)/); if (m) key = decodeURIComponent(m[1]);
+    const sender = d!.senderId.trim() || 'TOGG';
     try {
-      await save(d!);
-      // The public Give page and phones need the server address too (no secrets in it).
-      await setDoc(doc(db, 'settings', 'server'), { relayUrl: d!.relayUrl ?? '' }, { merge: true });
-      if (apiKey.trim()) {
-        await setDoc(doc(db, 'secrets', 'sms'), { apiKey: apiKey.trim(), updatedAt: serverTimestamp() });
+      await save({ ...d!, senderId: sender, relayUrl: relay });
+      await setDoc(doc(db, 'settings', 'server'), { relayUrl: relay }, { merge: true });
+      if (key) {
+        await setDoc(doc(db, 'secrets', 'sms'), { apiKey: key, updatedAt: serverTimestamp() });
+        await setDoc(doc(db, 'smsSender', 'gonline'), { apiKey: key, senderId: sender, updatedAt: serverTimestamp() });
         await setDoc(doc(db, 'settings', 'smsKeyStatus'), { set: true, by: profile?.displayName ?? '', at: serverTimestamp() });
         setApiKey(''); setKeySet(true);
+      } else if (keySet) {
+        await setDoc(doc(db, 'smsSender', 'gonline'), { senderId: sender, updatedAt: serverTimestamp() }, { merge: true });
       }
       toast('ok', 'SMS provider saved.');
     } catch (err) { toast('err', errorText(err)); }
@@ -482,7 +483,7 @@ function ProviderSettings() {
     setTesting(true);
     try {
       const r = await queueSms({ branchId: null, message: `Test SMS from TOGG church system. It works! - ${d!.churchName}`, audience: { type: 'custom', phones: [testTo] }, label: 'Test SMS', createdBy: profile?.uid, createdByName: profile?.displayName });
-      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Test sent. Check "Sent & scheduled" for the result.' : `Saved but the SMS service did not respond: ${r.error ?? ''}`);
+      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Test sent to Gonlinesites. It should arrive within a minute.' : `Not sent: ${r.error ?? ''}`);
     } catch (err) { toast('err', errorText(err)); } finally { setTesting(false); }
   }
 
@@ -490,22 +491,25 @@ function ProviderSettings() {
     <div className="grid gap-6 lg:grid-cols-3">
       <Card className="p-5 sm:p-6 lg:col-span-2">
         <form onSubmit={submit} className="space-y-4">
-          <Field label="SMS server (sends the messages)" hint="Free: a Google Apps Script set up once with your Google account — see sms-server/README.md. Paste its Web app URL here. Leave empty if you use Firebase Cloud Functions (Blaze plan).">
-            <Input type="url" value={d.relayUrl ?? ''} onChange={(e) => setD({ ...d, relayUrl: e.target.value })} placeholder="https://script.google.com/macros/s/…/exec" />
-          </Field>
-          <Field label="SMS provider" hint={hint[d.provider]}>
+          <Field label="SMS provider">
             <Select value={d.provider} onChange={(e) => setD({ ...d, provider: e.target.value as SmsSettings['provider'] })}>
-              <option value="gonlinesites">Gonlinesites</option>
-              <option value="arkesel">Arkesel</option><option value="mnotify">mNotify</option><option value="hubtel">Hubtel</option><option value="log">Test mode (don't send)</option>
+              <option value="gonlinesites">Gonlinesites</option><option value="log">Test mode (don't send)</option>
             </Select>
           </Field>
-          <Field label="Sender ID" hint="Up to 11 letters, as approved by your provider, e.g. TOGG or THRONEGRACE."><Input maxLength={11} value={d.senderId} onChange={(e) => setD({ ...d, senderId: e.target.value })} /></Field>
-          <Field label="API key" hint={keySet ? 'A key is saved. Type a new one only to replace it. For security it can never be shown again.' : 'Stored securely: only the SMS server can read it, not even admins.'}>
+          <Field label="API key" hint={keySet ? 'A key is saved. Paste a new one only to replace it (e.g. after changing your Gonlinesites password).' : 'From your Gonlinesites panel → API. You can paste the whole API link — the key is taken from it.'}>
             <div className="relative">
               <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-              <Input type="password" autoComplete="off" className="pl-9" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={keySet ? '•••••••• (saved)' : 'Paste API key'} />
+              <Input type="password" autoComplete="off" className="pl-9" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={keySet ? '•••••••• (saved)' : 'Paste API key or API link'} />
             </div>
           </Field>
+          <Field label="Sender ID" hint="Must be approved on your Gonlinesites account first (e.g. TOGG). A name that is not approved yet, such as GracePalace, is rejected by Gonlinesites (error 106) — ask Gonlinesites to register it, then type it here.">
+            <Input maxLength={11} value={d.senderId} onChange={(e) => setD({ ...d, senderId: e.target.value })} />
+          </Field>
+          <details className="rounded-xl border border-stone-200 p-3 text-sm">
+            <summary className="cursor-pointer font-medium text-stone-700">Automatic messages (optional server)</summary>
+            <p className="mt-2 text-stone-500">Messages you send go to Gonlinesites straight from this app. Automatic ones (absentees after service, birthdays, programme reminders, Paystack confirmations) need the free Google Apps Script server — see <code>sms-server/README.md</code>. Paste <b>its</b> address here, never the Gonlinesites link.</p>
+            <Input className="mt-2" type="url" value={d.relayUrl ?? ''} onChange={(e) => setD({ ...d, relayUrl: e.target.value })} placeholder="https://script.google.com/macros/s/…/exec" />
+          </details>
           <div className="flex justify-end"><Button type="submit">Save</Button></div>
         </form>
       </Card>
@@ -514,26 +518,19 @@ function ProviderSettings() {
         <p className="mb-3 text-sm text-stone-500">Save first, then text your own phone.</p>
         <Input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="024 000 0000" />
         <Button className="mt-3 w-full" variant="outline" loading={testing} onClick={test}><Send className="h-4 w-4" /> Send test SMS</Button>
-        <div className="mt-4 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
-          SMS sending runs on Firebase Cloud Functions, which needs the Firebase <b>Blaze (pay-as-you-go)</b> plan. Usage for a church is normally within the free allowance. See the README for the one-time setup.
-        </div>
+        <p className="mt-4 rounded-xl bg-royal-50 p-3 text-xs text-royal-900">Each SMS uses your Gonlinesites credit. Delivery reports and your balance are in your Gonlinesites dashboard.</p>
       </Card>
     </div>
   );
 }
 
-/** Red when nothing is really being sent; green when a real provider and a live SMS server are set. */
+/** Tells staff whether SMS really goes out. */
 function SmsModeBanner() {
   const [s] = useSmsSettings();
-  const [beat, setBeat] = useState<Date | null | undefined>(undefined);
-  useEffect(() => onSnapshot(doc(db, 'meta', 'heartbeat'), (x) => setBeat(x.exists() && x.data().at ? (x.data().at as { toDate(): Date }).toDate() : null), () => setBeat(null)), []);
-  if (!s || beat === undefined) return null;
-  const live = !!beat && Date.now() - beat.getTime() < 20 * 60_000;
-  if (s.provider === 'log') {
-    return <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><b>TEST MODE — no real SMS are sent.</b> Choose Arkesel, mNotify or Hubtel under “SMS provider” and enter your API key.</div>;
-  }
-  if (!live) {
-    return <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><b>The SMS server is not running</b>{beat ? ` (last seen ${beat.toLocaleString('en-GB')})` : ''}. Messages wait in the queue until it runs. Set up the free SMS server (sms-server/README.md) and paste its address under “SMS provider”, then check <a className="underline" href="/status">System status</a>.</div>;
-  }
-  return <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><b>SMS is live</b> via {s.provider}. Server last checked in {Math.max(0, Math.round((Date.now() - beat!.getTime()) / 60000))} min ago.</div>;
+  const [keySet, setKeySet] = useState<boolean | null>(null);
+  useEffect(() => onSnapshot(doc(db, 'settings', 'smsKeyStatus'), (x) => setKeySet(!!x.data()?.set), () => setKeySet(false)), []);
+  if (!s || keySet === null) return null;
+  if (s.provider === 'log') return <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"><b>TEST MODE — no real SMS are sent.</b> Choose Gonlinesites under “SMS provider”.</div>;
+  if (!keySet) return <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><b>No Gonlinesites API key yet.</b> Add it under “SMS provider”.</div>;
+  return <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><b>SMS is live</b> via Gonlinesites, sender <b>{s.senderId || 'TOGG'}</b>. Messages go out as soon as you press Send.</div>;
 }

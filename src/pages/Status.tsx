@@ -5,7 +5,9 @@ import { CheckCircle2, CircleAlert, Loader2, RefreshCw, Send, XCircle } from 'lu
 import { Button, Card, PageHeader, cx, useToast } from '../components/ui';
 import { db, firebaseConfig } from '../lib/firebase';
 import { isLocalAddress } from '../lib/settings';
-import { wakeSmsServer } from '../lib/sms';
+import { isServerUrl, smsServerLive, wakeSmsServer } from '../lib/sms';
+import { sendFromApp, waitingMessages } from '../lib/smsDirect';
+import { useAuth } from '../context/AuthContext';
 
 type Light = 'green' | 'amber' | 'red';
 interface Check { area: string; name: string; light: Light; detail: ReactNode; fix?: ReactNode }
@@ -16,6 +18,7 @@ async function safe<T>(fn: () => Promise<T>): Promise<{ ok: true; v: T } | { ok:
 
 export default function Status() {
   const toast = useToast();
+  const { profile } = useAuth();
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,20 +36,25 @@ export default function Status() {
     const s = sms.ok ? (sms.v.data() ?? {}) : {};
     const keySet = await safe(() => getDoc(doc(db, 'settings', 'smsKeyStatus')));
     const hasKey = keySet.ok && !!keySet.v.data()?.set;
-    if (!s.provider || s.provider === 'log') out.push({ area: 'SMS', name: 'SMS provider', light: 'red', detail: 'Test mode — messages are recorded but NOT sent.', fix: <>SMS messages → SMS provider: choose Arkesel / mNotify / Hubtel and save your API key.</> });
+    if (!s.provider || s.provider === 'log') out.push({ area: 'SMS', name: 'SMS provider', light: 'red', detail: 'Test mode — messages are recorded but NOT sent.', fix: <>SMS messages → SMS provider: choose Gonlinesites and save your API key.</> });
     else out.push({ area: 'SMS', name: 'SMS provider', light: hasKey ? 'green' : 'red', detail: hasKey ? `${s.provider} · sender ID “${s.senderId || 'TOGG'}”` : `${s.provider} chosen but no API key saved.`, fix: hasKey ? undefined : <>SMS messages → SMS provider → paste the API key.</> });
     const hb = await safe(() => getDoc(doc(db, 'meta', 'heartbeat')));
     const beat = hb.ok && hb.v.exists() ? hb.v.data() : null;
     const at: Date | null = beat?.at?.toDate ? beat.at.toDate() : null;
     const mins = at ? Math.round((Date.now() - at.getTime()) / 60000) : null;
+    const sender = await safe(() => getDoc(doc(db, 'smsSender', 'gonline')));
+    const appKey = sender.ok && !!sender.v.data()?.apiKey;
+    out.push(appKey ? { area: 'SMS', name: 'Sending from the app', light: 'green', detail: `Ready — messages go straight to Gonlinesites (sender “${sender.v.data()?.senderId || 'TOGG'}”) when you press Send.` }
+      : { area: 'SMS', name: 'Sending from the app', light: 'red', detail: 'No Gonlinesites key saved for the app.', fix: <>SMS messages → SMS provider → paste the API key → Save.</> });
+    if (s.relayUrl && !isServerUrl(String(s.relayUrl))) out.push({ area: 'SMS', name: 'SMS server address', light: 'red', detail: 'The “server” box holds the Gonlinesites link — it is ignored. Only a Google Apps Script address belongs there.', fix: <>SMS messages → SMS provider → Automatic messages → clear the box → Save.</> });
     out.push(!at
-      ? { area: 'SMS', name: 'SMS server', light: 'red', detail: 'No SMS server has ever checked in, so nothing is sent.', fix: <>Set up the free server: <code>sms-server/README.md</code> (10 minutes, no Blaze plan), then paste its URL under SMS provider.</> }
-      : mins! <= 15 ? { area: 'SMS', name: 'SMS server', light: beat?.ok === false ? 'amber' : 'green', detail: `Running (${beat?.via}) — last checked in ${mins} min ago.${beat?.error ? ` Last error: ${beat.error}` : ''}` }
-        : { area: 'SMS', name: 'SMS server', light: 'red', detail: `Stopped — last checked in ${at.toLocaleString('en-GB')}.`, fix: <>In the Apps Script editor run <b>setup</b> again (it restarts the 5-minute timer).</> });
+      ? { area: 'SMS', name: 'Automatic messages server', light: 'amber', detail: 'Not set up. Messages you send work; automatic ones (absentees, birthdays, programme reminders, Paystack confirmations) need it.', fix: <>Optional free server: <code>sms-server/README.md</code> (10 minutes).</> }
+      : mins! <= 15 ? { area: 'SMS', name: 'Automatic messages server', light: beat?.ok === false ? 'amber' : 'green', detail: `Running (${beat?.via}) — last checked in ${mins} min ago.${beat?.error ? ` Last error: ${beat.error}` : ''}` }
+        : { area: 'SMS', name: 'Automatic messages server', light: 'amber', detail: `Stopped — last checked in ${at.toLocaleString('en-GB')}.`, fix: <>In the Apps Script editor run <b>setup</b> again (it restarts the 5-minute timer).</> });
     const queued = await safe(() => getDocs(query(collection(db, 'smsMessages'), where('status', '==', 'queued'))));
     if (queued.ok) {
       const stuck = queued.v.docs.filter((d) => { const c = d.data().createdAt?.toDate?.(); return !c || Date.now() - c.getTime() > 10 * 60000; }).length;
-      out.push(stuck ? { area: 'SMS', name: 'Waiting messages', light: 'red', detail: `${stuck} message(s) waiting more than 10 minutes.`, fix: <>Use “Send waiting messages now” below once the server is set up.</> }
+      out.push(stuck ? { area: 'SMS', name: 'Waiting messages', light: 'red', detail: `${stuck} message(s) waiting more than 10 minutes.`, fix: <>Press “Send waiting messages now” below.</> }
         : { area: 'SMS', name: 'Waiting messages', light: 'green', detail: 'Nothing stuck in the queue.' });
     }
     const recent = await safe(() => getDocs(query(collection(db, 'smsMessages'), where('status', 'in', ['sent', 'failed']))));
@@ -91,8 +99,14 @@ export default function Status() {
 
   async function sendNow() {
     setBusy(true);
-    const r = await wakeSmsServer();
-    toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Asked the SMS server to send everything waiting. Refreshing…' : r.error ?? 'No SMS server set up.');
+    if (await smsServerLive()) {
+      const r = await wakeSmsServer();
+      toast(r.delivered ? 'ok' : 'err', r.delivered ? 'Asked the SMS server to send everything waiting. Refreshing…' : r.error ?? 'The SMS server did not answer.');
+    } else if (profile) {
+      let sent = 0, done = 0;
+      for (const id of await waitingMessages(null, 24 * 365)) { const r = await sendFromApp(id, profile.uid); if (!r.skipped) { done++; sent += r.sent; } }
+      toast(done ? 'ok' : 'err', done ? `${done} message(s) sent to Gonlinesites (${sent} SMS). Refreshing…` : 'Nothing could be sent — check the API key.');
+    }
     setTimeout(() => { run(); setBusy(false); }, 6000);
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { addDoc, collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowLeft, BellRing, Check, HandHeart, Home, Lock, MessageCircleHeart, Pencil, Phone, Sparkles, Wallet } from 'lucide-react';
+import { BellRing, Check, HandHeart, Home, Lock, MessageCircleHeart, Pencil, Phone, Sparkles, Wallet } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, Select, Spinner, Textarea, cx, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -34,7 +34,6 @@ export default function MemberProfile() {
 
   return (
     <div>
-      <Link to="/members" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> Members</Link>
       <Card className="mb-6 overflow-hidden">
         <div className="flex flex-col gap-4 bg-royal-950 p-6 text-white sm:flex-row sm:items-center">
           <Avatar text={initials(m.firstName, m.lastName)} className="!h-16 !w-16 bg-gold-400 !text-xl text-royal-950" />

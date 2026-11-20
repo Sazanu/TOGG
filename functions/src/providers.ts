@@ -1,7 +1,12 @@
 /** SMS gateways used in Ghana. Each returns how many messages were accepted. */
 export interface SendResult { sent: number; failed: number; error?: string; response?: string }
 /** Words in a Gonlinesites reply that mean the SMS was NOT sent. */
-export const GONLINE_ERROR = /error|invalid|insufficient|fail|denied|wrong|incorrect|not ?allowed|unauthori[sz]ed|low balance/i;
+export const GONLINE_ERROR = /error|invalid|insufficient|fail|denied|wrong|incorrect|not ?allowed|unauthori[sz]ed|low balance|blacklist/i;
+/** Gonlinesites replies in JSON: {"code":"ok"} when accepted, {"code":"106","message":"Invalid Sender id"} etc. when not. */
+export function gonlineOk(body: string): boolean {
+  try { const j = JSON.parse(body); const c = String(j.code ?? j.status ?? '').toLowerCase(); return ['ok', 'success', '200', '1000'].includes(c); }
+  catch { return body.trim().length > 0 && !GONLINE_ERROR.test(body); }
+}
 export interface Provider { name: string; send(to: string[], text: string): Promise<SendResult> }
 
 export interface ProviderConfig { provider: string; senderId: string; apiKey: string }
@@ -48,7 +53,7 @@ export function makeProvider(cfg: ProviderConfig): Provider {
           let res: Response;
           try { res = await fetch(`https://sms.gonlinesites.com/app/sms/api?${q}`); } catch { res = await fetch(`http://sms.gonlinesites.com/app/sms/api?${q}`); }
           const body = await res.text();
-          if (res.ok && !GONLINE_ERROR.test(body)) return { sent: to.length, failed: 0, response: body.slice(0, 300) };
+          if (res.ok && gonlineOk(body)) return { sent: to.length, failed: 0, response: body.slice(0, 300) };
           return { sent: 0, failed: to.length, error: `Gonlinesites ${res.status}: ${body.slice(0, 200)}` };
         },
       };

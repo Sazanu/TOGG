@@ -317,9 +317,18 @@ service cloud.firestore {
         && request.resource.data.kind in ['instant', 'scheduled']
         && request.resource.data.message is string && request.resource.data.message.size() > 0 && request.resource.data.message.size() <= 918
         && (isGlobal() || request.resource.data.audience.branchId == request.resource.data.branchId);
-      allow update: if canSms(resource.data.branchId) && resource.data.status == 'scheduled'
-        && request.resource.data.status == 'cancelled'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow update: if canSms(resource.data.branchId) && (
+        // cancel a scheduled message
+        (resource.data.status == 'scheduled' && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+        // the app claims a waiting message to send it to Gonlinesites itself (only once)
+        || ((resource.data.status == 'queued' || (resource.data.status == 'scheduled' && resource.data.sendAt <= request.time))
+          && request.resource.data.status == 'sending' && request.resource.data.claimedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'via', 'claimedBy', 'startedAt']))
+        // ...and records the result of its own claim
+        || (resource.data.status == 'sending' && resource.data.get('claimedBy', '') == request.auth.uid
+          && request.resource.data.status in ['sent', 'failed']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'provider', 'recipientsCount', 'sentCount', 'failedCount', 'providerResponse', 'error', 'finishedAt'])));
       allow delete: if isGlobal();
     }
 
@@ -422,6 +431,12 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answerNote', 'memberId', 'updatedAt'])
         && request.resource.data.status in ['new', 'praying', 'answered'];
       allow delete: if isGlobal();
+    }
+
+    // Gonlinesites key used by the app itself to send SMS: only staff who may send SMS can read it.
+    match /smsSender/{id} {
+      allow read: if canSms(me().get('branchId', null));
+      allow write: if isGlobal();
     }
 
     // SMS API key: admins can set it, nobody can read it back (only the server).

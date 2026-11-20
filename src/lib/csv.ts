@@ -1,16 +1,19 @@
-import * as XLSX from 'xlsx';
+/** The Excel library is big, so it is only loaded when someone imports or exports a file. */
+const xlsx = () => import('xlsx');
 import { isoDate } from './format';
 
 export type Row = Record<string, unknown>;
 
 /** Download rows as a real Excel workbook (one sheet per entry). */
 export function downloadExcel(filename: string, sheets: { name: string; rows: Row[] }[]): void {
+  xlsx().then((XLSX) => {
   const wb = XLSX.utils.book_new();
   sheets.forEach((s) => {
     const ws = XLSX.utils.json_to_sheet(s.rows.length ? s.rows : [{ '(empty)': '' }]);
     XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31));
   });
   XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`);
+  }).catch((e) => alert(`Could not create the Excel file: ${e instanceof Error ? e.message : e}`));
 }
 
 /** Back-compat helper: single-sheet export. */
@@ -33,6 +36,7 @@ export interface Sheet { headers: string[]; rows: Record<string, string>[]; shee
 /** Reads .xlsx, .xls or .csv. Every cell comes back as a trimmed string; dates as YYYY-MM-DD. */
 export async function readSheet(file: File, sheetName?: string): Promise<Sheet> {
   const buf = await file.arrayBuffer();
+  const XLSX = await xlsx();
   const wb = XLSX.read(buf, { type: 'array', cellDates: true });
   // Pick the requested sheet, else one named like "import"/"members", else the one with the most rows.
   const size = (n: string) => XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1 }).length;

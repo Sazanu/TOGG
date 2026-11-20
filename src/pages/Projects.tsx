@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { QRCodeSVG } from 'qrcode.react';
-import { ArrowLeft, CheckCircle2, Circle, Copy, Hammer, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Copy, Hammer, Pencil, Plus, Share2, Trash2 } from 'lucide-react';
 import { HowToPay } from '../components/HowToPay';
 import { FullLogo } from '../components/Logo';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Spinner, Textarea, cx, errorText, useToast } from '../components/ui';
@@ -172,7 +172,6 @@ export function ProjectDetail() {
 
   return (
     <div>
-      <Link to="/projects" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> Projects</Link>
       <PageHeader title={p.title} subtitle={`Started ${prettyDate(p.startDate)}${p.targetDate ? ` · target ${prettyDate(p.targetDate)}` : ''}`}
         actions={<>
           {p.public && <Button variant="outline" onClick={() => setSharing(true)}><Share2 className="h-4 w-4" /> Share</Button>}

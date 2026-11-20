@@ -1,10 +1,11 @@
 import { addDoc, collection, doc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from './firebase';
+import { auth, db, functions } from './firebase';
+import { sendFromApp } from './smsDirect';
 import type { Audience, Member, SmsSettings } from './types';
 
 export const DEFAULT_SMS_SETTINGS: SmsSettings = {
-  provider: 'log',
+  provider: 'gonlinesites',
   senderId: 'TOGG',
   churchName: "Throne of God's Grace Ministries",
   absenteeEnabled: false,
@@ -23,17 +24,8 @@ export const TEMPLATES = [
   { label: 'Welcome visitor', text: 'Hello {firstName}, thank you for worshipping with us. You are welcome to TOGG! We would love to see you again. - {church}' },
 ];
 
-/** Same rules the SMS server uses (functions/src/core.ts). */
-export function normalizePhone(raw: string): string | null {
-  const s = String(raw || '').trim();
-  const d = s.replace(/\D/g, '');
-  if (!d) return null;
-  if (d.startsWith('233') && d.length === 12) return d;
-  if (d.startsWith('0') && d.length === 10) return '233' + d.slice(1);
-  if (d.length === 9) return '233' + d;
-  if (s.startsWith('+') && d.length >= 10 && d.length <= 15) return d;
-  return null;
-}
+export { normalizePhone } from './smsDirect';
+import { normalizePhone } from './smsDirect';
 
 /** Estimate of who will receive a message, computed from members already loaded in the app. */
 export function estimateRecipients(a: Audience, members: Member[], deptIds: (id: string) => string[]): number {
@@ -55,7 +47,7 @@ export function estimateRecipients(a: Audience, members: Member[], deptIds: (id:
 export async function queueSms(data: {
   branchId: string | null; message: string; audience: Audience; label: string; sendAt?: Date | null;
   createdBy?: string; createdByName?: string; estimate?: number;
-}): Promise<{ id: string; delivered: boolean; error?: string }> {
+}): Promise<{ id: string; delivered: boolean; via?: string; error?: string }> {
   const scheduled = !!data.sendAt && data.sendAt.getTime() > Date.now() + 60_000;
   const ref = await addDoc(collection(db, 'smsMessages'), {
     branchId: data.branchId, message: data.message, audience: data.audience, label: data.label,
@@ -64,8 +56,25 @@ export async function queueSms(data: {
     createdBy: data.createdBy ?? null, createdByName: data.createdByName ?? '', createdAt: serverTimestamp(),
   });
   if (scheduled) return { id: ref.id, delivered: false };
-  return wakeSmsServer(ref.id);
+  // The Apps Script server sends it if it is running; otherwise this app sends it to Gonlinesites itself.
+  if (await smsServerLive()) return wakeSmsServer(ref.id);
+  const uid = data.createdBy ?? auth.currentUser?.uid;
+  if (!uid) return wakeSmsServer(ref.id);
+  const r = await sendFromApp(ref.id, uid);
+  if (r.skipped) return { id: ref.id, delivered: true, via: 'app' }; // another screen or the server took it
+  return { id: ref.id, delivered: r.sent > 0, via: 'app', error: r.error ?? (r.sent ? undefined : 'Nothing was sent — see the message in "Sent & scheduled".') };
 }
+
+/** True when the free Apps Script server has checked in during the last 20 minutes. */
+export async function smsServerLive(): Promise<boolean> {
+  try {
+    const at = (await getDoc(doc(db, 'meta', 'heartbeat'))).data()?.at;
+    return !!at && Date.now() - at.toDate().getTime() < 20 * 60_000;
+  } catch { return false; }
+}
+
+/** Only a Google Apps Script web-app address can be the SMS server (not the Gonlinesites API link). */
+export const isServerUrl = (u: string) => /^https:\/\/script\.google(usercontent)?\.com\/|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(u.trim()); // local address: testing only
 
 /**
  * Asks the SMS server to send what is waiting.
@@ -76,6 +85,7 @@ export async function wakeSmsServer(id?: string): Promise<{ id: string; delivere
   let relayUrl = '';
   try { relayUrl = String((await getDoc(doc(db, 'settings', 'server'))).data()?.relayUrl ?? ''); } catch { /* public pages */ }
   if (!relayUrl) { try { relayUrl = String((await getDoc(doc(db, 'settings', 'sms'))).data()?.relayUrl ?? ''); } catch { /* ignore */ } }
+  if (!isServerUrl(relayUrl)) relayUrl = '';
   if (relayUrl) {
     try {
       // The Apps Script answers from another site, so the reply is not readable here;

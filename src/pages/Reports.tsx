@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Plus, Printer, RotateCcw, Send, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Plus, Printer, RotateCcw, Send, Trash2 } from 'lucide-react';
 import { Badge, Button, Card, Empty, Field, Input, PageHeader, Select, Spinner, Textarea, cx, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
@@ -173,7 +173,6 @@ export function ReportEditor() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link to={`/reports?month=${month}&type=${type}`} className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700 print:hidden"><ArrowLeft className="h-4 w-4" /> All reports</Link>
       <PageHeader
         title={`${deptName(deptId)} — ${typeLabel}`}
         subtitle={`${monthLabel(month)} · ${branchName(branchId)}`}

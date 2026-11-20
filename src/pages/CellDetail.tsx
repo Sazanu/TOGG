@@ -1,7 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { collection, deleteDoc, doc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore';
-import { ArrowLeft, ClipboardPlus, Home, Pencil, Plus, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
+import { ClipboardPlus, Home, Pencil, Plus, Search, Trash2, UserMinus, UserPlus } from 'lucide-react';
 import { Avatar, Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Stat, Textarea, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -43,7 +43,6 @@ export default function CellDetail() {
 
   return (
     <div>
-      <Link to="/cells" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> Cells</Link>
       <PageHeader
         title={cell.name}
         subtitle={`${branchName(cell.branchId)} · ${cell.meetingDay}s ${cell.meetingTime}${cell.location ? ` · ${cell.location}` : ''}`}

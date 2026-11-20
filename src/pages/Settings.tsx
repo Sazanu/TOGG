@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { useSecuritySettings, type SecuritySettings } from '../components/IdleLogout';
+import { useAuth } from '../context/AuthContext';
 import { ExternalLink } from 'lucide-react';
-import { Button, Card, Field, Input, PageHeader, Textarea, errorText, useToast } from '../components/ui';
+import { Button, Card, Field, Input, PageHeader, Select, Textarea, errorText, useToast } from '../components/ui';
 import { db, firebaseConfig } from '../lib/firebase';
 import { publicBase, usePayments } from '../lib/settings';
 import { useMediaSettings, type MediaSettings } from '../lib/media';
@@ -50,6 +52,7 @@ export default function Settings() {
         </Card>
         <div className="flex justify-end"><Button type="submit">Save</Button></div>
       </form>
+      <SecurityCard />
       <PaystackKeys />
       <MediaStorage />
     </div>
@@ -148,6 +151,43 @@ function PaystackKeys() {
         </Field>
         <p className="text-xs text-stone-500">Payments are only recorded after the server confirms them with Paystack, using the amount Paystack actually received. Paystack's fee is noted on each record.</p>
         <div className="flex justify-end"><Button type="submit">Save Paystack</Button></div>
+      </Card>
+    </form>
+  );
+}
+
+/** Head Pastor: automatic sign-out and how often reminders ring again. */
+function SecurityCard() {
+  const toast = useToast();
+  const { profile } = useAuth();
+  const saved = useSecuritySettings();
+  const [d, setD] = useState<SecuritySettings | null>(null);
+  useEffect(() => { setD(saved); }, [saved]);
+  if (!d) return null;
+  const head = profile?.role === 'head_pastor';
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    try { await setDoc(doc(db, 'settings', 'security'), { idleMinutes: Number(d!.idleMinutes) || 0, reminderRepeatMinutes: Number(d!.reminderRepeatMinutes) || 0, by: profile?.displayName ?? '', at: serverTimestamp() }); toast('ok', 'Saved for everyone.'); }
+    catch (err) { toast('err', errorText(err)); }
+  }
+  return (
+    <form onSubmit={save} className="mt-6">
+      <Card className="space-y-4 p-6">
+        <h2 className="font-semibold text-stone-900">Security &amp; reminders</h2>
+        {!head && <p className="text-sm text-stone-500">Only the Head Pastor can change these.</p>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Sign out when left unattended for" hint="Minutes without any click, typing or scrolling. 0 = never.">
+            <Select disabled={!head} value={String(d.idleMinutes)} onChange={(e) => setD({ ...d, idleMinutes: Number(e.target.value) })}>
+              {[5, 10, 15, 20, 30, 45, 60, 120, 0].map((n) => <option key={n} value={n}>{n ? `${n} minutes` : 'Never'}</option>)}
+            </Select>
+          </Field>
+          <Field label="Ring again for due reminders every" hint="Reminders keep ringing until they are marked done. 0 = ring once.">
+            <Select disabled={!head} value={String(d.reminderRepeatMinutes)} onChange={(e) => setD({ ...d, reminderRepeatMinutes: Number(e.target.value) })}>
+              {[1, 5, 10, 15, 30, 60, 120, 0].map((n) => <option key={n} value={n}>{n ? `${n} minute${n > 1 ? 's' : ''}` : 'Ring once only'}</option>)}
+            </Select>
+          </Field>
+        </div>
+        {head && <div className="flex justify-end"><Button type="submit">Save</Button></div>}
       </Card>
     </form>
   );

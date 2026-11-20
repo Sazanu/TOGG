@@ -1,47 +1,59 @@
-import type { ReactNode } from 'react';
+import { Suspense, lazy, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { IdleLogout } from './components/IdleLogout';
 import { Spinner, ToastProvider } from './components/ui';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { DataProvider } from './context/DataContext';
+import { DataProvider, useData } from './context/DataContext';
 import { firebaseConfigured } from './lib/firebase';
 import { can, isGlobal, type Capability } from './lib/roles';
-import Attendance from './pages/Attendance';
-import Branches from './pages/Branches';
-import CheckIn from './pages/CheckIn';
-import Dashboard from './pages/Dashboard';
-import Departments from './pages/Departments';
-import Giving from './pages/Giving';
 import Login from './pages/Login';
-import Members from './pages/Members';
 import NotConfigured from './pages/NotConfigured';
 import Pending from './pages/Pending';
-import PublicForm from './pages/PublicForm';
-import Registrations from './pages/Registrations';
-import Users from './pages/Users';
-import Tithes from './pages/Tithes';
-import Reports, { ReportEditor } from './pages/Reports';
-import DepartmentDetail from './pages/DepartmentDetail';
-import Cells from './pages/Cells';
-import CellDetail from './pages/CellDetail';
-import Messages from './pages/Messages';
-import Database from './pages/Database';
-import MemberProfile from './pages/MemberProfile';
-import Prayer from './pages/Prayer';
-import PublicPrayer from './pages/PublicPrayer';
-import Welfare from './pages/Welfare';
-import Projects, { ProjectDetail, PublicProject } from './pages/Projects';
-import Charity, { PublicCharity, useCanCharity } from './pages/Charity';
-import Settings from './pages/Settings';
-import PublicPay from './pages/PublicPay';
-import Status from './pages/Status';
-import ServiceFinance from './pages/ServiceFinance';
-import Leadership from './pages/Leadership';
-import Station from './pages/Station';
-import PublicHere from './pages/PublicHere';
+import { useCanCharity } from './pages/Charity';
+
+const Attendance = lazy(() => import('./pages/Attendance'));
+const Branches = lazy(() => import('./pages/Branches'));
+const CheckIn = lazy(() => import('./pages/CheckIn'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Departments = lazy(() => import('./pages/Departments'));
+const Giving = lazy(() => import('./pages/Giving'));
+const Members = lazy(() => import('./pages/Members'));
+const PublicForm = lazy(() => import('./pages/PublicForm'));
+const Registrations = lazy(() => import('./pages/Registrations'));
+const Users = lazy(() => import('./pages/Users'));
+const Tithes = lazy(() => import('./pages/Tithes'));
+const Reports = lazy(() => import('./pages/Reports'));
+const ReportEditor = lazy(() => import('./pages/Reports').then((x) => ({ default: x.ReportEditor })));
+const DepartmentDetail = lazy(() => import('./pages/DepartmentDetail'));
+const Cells = lazy(() => import('./pages/Cells'));
+const CellDetail = lazy(() => import('./pages/CellDetail'));
+const Messages = lazy(() => import('./pages/Messages'));
+const Database = lazy(() => import('./pages/Database'));
+const MemberProfile = lazy(() => import('./pages/MemberProfile'));
+const Prayer = lazy(() => import('./pages/Prayer'));
+const PublicPrayer = lazy(() => import('./pages/PublicPrayer'));
+const Welfare = lazy(() => import('./pages/Welfare'));
+const Projects = lazy(() => import('./pages/Projects'));
+const ProjectDetail = lazy(() => import('./pages/Projects').then((x) => ({ default: x.ProjectDetail })));
+const PublicProject = lazy(() => import('./pages/Projects').then((x) => ({ default: x.PublicProject })));
+const Charity = lazy(() => import('./pages/Charity'));
+const PublicCharity = lazy(() => import('./pages/Charity').then((x) => ({ default: x.PublicCharity })));
+const Settings = lazy(() => import('./pages/Settings'));
+const PublicPay = lazy(() => import('./pages/PublicPay'));
+const Status = lazy(() => import('./pages/Status'));
+const ServiceFinance = lazy(() => import('./pages/ServiceFinance'));
+const Leadership = lazy(() => import('./pages/Leadership'));
+const Station = lazy(() => import('./pages/Station'));
+const PublicHere = lazy(() => import('./pages/PublicHere'));
 
 function CharityGuard({ children }: { children: ReactNode }) {
-  return useCanCharity() ? <>{children}</> : <Navigate to="/" replace />;
+  const ok = useCanCharity();
+  const { profile } = useAuth();
+  const { departments } = useData();
+  // Wait for the department list before deciding (charity leaders get access through their department).
+  if (!ok && profile && !isGlobal(profile.role) && (profile.departmentIds ?? []).length && departments.length === 0) return <Spinner />;
+  return ok ? <>{children}</> : <Navigate to="/" replace />;
 }
 
 function Guard({ cap, children }: { cap: Capability; children: ReactNode }) {
@@ -57,6 +69,7 @@ function Private() {
   if (!ready) return <Pending />;
   return (
     <DataProvider>
+      <Suspense fallback={<div className="min-h-screen bg-cream"><Spinner /></div>}>
       <Routes>
         <Route path="station/:serviceId" element={<Guard cap="attendance.write"><Station /></Guard>} />
         <Route element={<Layout />}>
@@ -90,6 +103,8 @@ function Private() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      </Suspense>
+      <IdleLogout />
     </DataProvider>
   );
 }
@@ -100,6 +115,7 @@ export default function App() {
     <ToastProvider>
       <AuthProvider>
         <BrowserRouter>
+          <Suspense fallback={<div className="min-h-screen bg-cream"><Spinner /></div>}>
           <Routes>
             <Route path="/join" element={<PublicForm kind="member" />} />
             <Route path="/visit" element={<PublicForm kind="visitor" />} />
@@ -110,6 +126,7 @@ export default function App() {
             <Route path="/charity-give" element={<PublicCharity />} />
             <Route path="/*" element={<Private />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
     </ToastProvider>

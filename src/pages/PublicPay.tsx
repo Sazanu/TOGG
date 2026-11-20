@@ -44,6 +44,14 @@ export default function PublicPay() {
     }, () => {});
   }, [ref, stage]);
 
+  // Never leave the giver stuck on a spinner: after 20 s show the receipt and a way out.
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (stage !== 'confirming') { setSlow(false); return; }
+    const t = setTimeout(() => setSlow(true), 20_000);
+    return () => clearTimeout(t);
+  }, [stage]);
+
   async function give(e: FormEvent) {
     e.preventDefault();
     const amount = Math.round(Number(d.amount) * 100) / 100;
@@ -87,6 +95,17 @@ export default function PublicPay() {
                 <p className="mt-1 text-sm text-stone-600">{money(gift.amount)} for {PURPOSES.find((x) => x.value === gift.purpose)?.label.toLowerCase()} has been received and recorded.</p>
                 <p className="mt-2 font-mono text-xs text-stone-400">Receipt: {gift.id}</p>
                 <Button variant="outline" className="mt-5" onClick={() => { setStage('form'); setRef(''); setGift(null); set('amount', ''); }}>Give again</Button>
+              </div>
+            ) : stage === 'confirming' && slow ? (
+              <div className="py-4 text-center">
+                <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-500" />
+                <h2 className="mt-3 font-display text-xl font-bold text-royal-950">Payment received by Paystack</h2>
+                <p className="mt-1 text-sm text-stone-600">Thank you! It will appear in the church records once it is confirmed. Keep this receipt number:</p>
+                <p className="mt-2 font-mono text-sm text-stone-700">{ref}</p>
+                <div className="mt-5 flex justify-center gap-2">
+                  <Button variant="outline" onClick={() => window.history.length > 1 ? window.history.back() : (window.location.href = '/')}>Back</Button>
+                  <Button onClick={() => { setStage('form'); setRef(''); setGift(null); set('amount', ''); }}>Done</Button>
+                </div>
               </div>
             ) : stage === 'confirming' || stage === 'paying' ? (
               <div className="py-8 text-center">

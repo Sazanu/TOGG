@@ -55,12 +55,15 @@ The website is only the `dist` folder, so any static host works. The routing fil
 
 Whichever host you use, enter its address in TOGG under **Payments & links → Public web address** so the QR codes and SMS links point to it.
 
-## 5. Turn on SMS — free, no Blaze plan
+## 5. Turn on SMS (Gonlinesites)
+In TOGG: **SMS messages → SMS provider**. Choose **Gonlinesites**, paste your **API key** (or the whole Gonlinesites API link), enter Sender ID **TOGG** (or another one Gonlinesites has approved), then **Save → Send test SMS**.
+Messages you send now go straight from the app to Gonlinesites. No server is needed.
+
+**Optional: automatic messages** (absentees after service, birthdays, programme reminders, Paystack confirmations) need the free Apps Script server.
 Follow **[sms-server/README.md](sms-server/README.md)** (about 10 minutes). In short:
 1. script.google.com → New project → paste `sms-server/Code.js` and `sms-server/appsscript.json` → run **setup**.
 2. Deploy → New deployment → **Web app** (Execute as *Me*, access *Anyone*) → copy the URL.
-3. In TOGG: **SMS messages → SMS provider** → paste the URL, choose **Gonlinesites** (or Arkesel / mNotify / Hubtel),
-   Sender ID and **API key** → Save → *Send test SMS*.
+3. In TOGG: **SMS messages → SMS provider → Automatic messages**. Paste the **script.google.com** URL there (never the Gonlinesites link) → Save.
 4. Open **System status**: the SMS lines should be green. Press *Send waiting messages now* to send anything stuck.
 
 *(Alternative with the Blaze plan: `npx firebase deploy --only functions`.)*

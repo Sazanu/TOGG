@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   collection, deleteDoc, doc, increment, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc, writeBatch,
 } from 'firebase/firestore';
-import { ArrowLeft, Check, Download, MessageSquare, Minus, Plus, Search, Tablet, Trash2, UserPlus, X } from 'lucide-react';
+import { Check, Download, MessageSquare, Minus, Plus, Search, Tablet, Trash2, UserPlus, X } from 'lucide-react';
 import { Avatar, Button, Card, Empty, Input, PageHeader, Spinner, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -148,7 +148,6 @@ export default function CheckIn() {
 
   return (
     <div>
-      <Link to="/attendance" className="mb-4 inline-flex items-center gap-1 text-sm text-stone-500 hover:text-royal-700"><ArrowLeft className="h-4 w-4" /> All services</Link>
       <PageHeader
         title={service.title || service.type}
         subtitle={`${prettyDate(service.date)} · ${branchName(service.branchId)}`}
