@@ -9,7 +9,7 @@ import { downloadCsv } from '../lib/csv';
 import { db } from '../lib/firebase';
 import { GIVING_TYPES, MONTHS, PAYMENT_METHODS, labelOf, money, monthRange, prettyDate, shortDate, today } from '../lib/format';
 import { can } from '../lib/roles';
-import type { Gift, GivingType, PaymentMethod } from '../lib/types';
+import type { Gift, GivingType, OnlineGift, PaymentMethod } from '../lib/types';
 
 export function useGifts(scope: string, start: string, end: string) {
   const [gifts, setGifts] = useState<Gift[]>([]);
@@ -203,6 +203,7 @@ export default function Giving() {
         </div>
       </div>
 
+      <OnlinePayments />
       {open && <RecordGift onClose={() => setOpen(false)} />}
     </div>
   );
@@ -325,5 +326,34 @@ export function RecordGift({ onClose, preset }: { onClose: () => void; preset?: 
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** Paystack payments from the public Give page (finance view). */
+function OnlinePayments() {
+  const { scope, branchName } = useData();
+  const { profile } = useAuth();
+  const [items, setItems] = useState<OnlineGift[] | null>(null);
+  const branch = profile?.branchId ?? scope;
+  useEffect(() => {
+    const base = collection(db, 'onlineGifts');
+    const q = branch === ALL ? query(base) : query(base, where('branchId', '==', branch));
+    return onSnapshot(q, (s) => setItems(s.docs.map((d) => ({ id: d.id, ...d.data() }) as OnlineGift).sort((a, b) => (b.createdAt?.toDate().getTime() ?? 0) - (a.createdAt?.toDate().getTime() ?? 0)).slice(0, 30)), () => setItems([]));
+  }, [branch]);
+  if (!items || items.length === 0) return null;
+  const color = { success: 'green', pending: 'gold', failed: 'red', abandoned: 'gray' } as const;
+  return (
+    <Card className="mt-6">
+      <div className="border-b border-stone-100 px-5 py-3"><h2 className="font-semibold text-stone-900">Online payments (Paystack)</h2><p className="text-xs text-stone-500">Confirmed payments are added to the records above automatically.</p></div>
+      <ul className="divide-y divide-stone-100">
+        {items.map((g) => (
+          <li key={g.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+            <div className="min-w-0 flex-1"><div className="truncate font-medium text-stone-900">{g.name || 'Giver'} · {g.purpose}</div><div className="truncate text-xs text-stone-500">{g.phone} · {g.id}{branch === ALL && ` · ${branchName(g.branchId)}`}{g.error && ` · ${g.error}`}</div></div>
+            <span className="font-semibold">{money(g.amount)}</span>
+            <Badge color={color[g.status]}>{g.status === 'pending' ? 'confirming…' : g.status}</Badge>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

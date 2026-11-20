@@ -202,5 +202,21 @@ await t('automatic monthly reminder, once on the set day', async () => {
   eq(sentLog.filter((x) => x.text.includes('welfare')).length, sentLog.slice(0, n).filter((x) => x.text.includes('welfare')).length, 'sent twice;');
 });
 
+console.log('Paystack (Cloud Functions version)');
+await t('confirms a paid MoMo tithe once; ignores unknown references', async () => {
+  await db.doc('secrets/paystack').set({ secretKey: 'sk_test_x' });
+  await M('payer', { phone: '0277000111' });
+  await db.doc('onlineGifts/TOGG-FN1').set({ purpose: 'tithe', projectId: '', branchId: 'A', name: 'P', phone: '0277000111', phoneKey: '277000111', email: '', amount: 50, currency: 'GHS', status: 'pending', createdAt: new Date() });
+  await db.doc('onlineGifts/TOGG-FN2').set({ purpose: 'tithe', projectId: '', branchId: 'A', name: 'Fake', phone: '', phoneKey: '', email: '', amount: 9999, currency: 'GHS', status: 'pending', createdAt: new Date() });
+  const fake = async (url) => url.endsWith('TOGG-FN1')
+    ? { status: 200, json: async () => ({ status: true, data: { status: 'success', reference: 'TOGG-FN1', amount: 5000, currency: 'GHS', channel: 'mobile_money', paid_at: '2026-11-22T10:00:00Z' } }) }
+    : { status: 400, json: async () => ({ status: false, message: 'not found' }) };
+  eq(await core.verifyOnlineGifts(db, new Date(), fake), 1);
+  eq(await core.verifyOnlineGifts(db, new Date(), fake), 0);
+  const g = (await db.doc('giving/ps_TOGG-FN1').get()).data();
+  eq([g.amount, g.method, g.memberId, g.type], [50, 'momo', 'payer', 'tithe']);
+  eq((await db.doc('onlineGifts/TOGG-FN2').get()).data().status, 'pending');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

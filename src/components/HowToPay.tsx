@@ -1,12 +1,16 @@
 import { Copy, CreditCard, Landmark, Smartphone } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from './ui';
 import type { PaymentSettings } from '../lib/types';
 
 /** The church's payment details, for public pages. */
-export function HowToPay({ p, reference }: { p: PaymentSettings; reference?: string }) {
-  const none = !p.momoNumber && !p.paymentLink && !p.bankDetails;
+export function HowToPay({ p, reference, giveLink }: { p: PaymentSettings; reference?: string; giveLink?: string }) {
+  const none = !p.momoNumber && !p.paymentLink && !p.bankDetails && !(p.paystackPublicKey && giveLink);
   return (
     <div className="space-y-3">
+      {p.paystackPublicKey && giveLink && (
+        <Link to={giveLink} className="block"><Button variant="gold" className="w-full !py-3 text-base"><CreditCard className="h-5 w-5" /> Give online — MoMo or card</Button></Link>
+      )}
       {none && <p className="text-sm text-stone-500">Payment details have not been set yet. Please give at church or contact the church office.</p>}
       {p.paymentLink && (
         <a href={p.paymentLink} target="_blank" rel="noreferrer" className="block">

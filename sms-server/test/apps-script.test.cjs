@@ -5,6 +5,7 @@ const PROJECT = 'demo-sms'; const HOST = process.env.FIRESTORE_EMULATOR_HOST || 
 const BASE = `http://${HOST}/v1/projects/${PROJECT}/databases/(default)/documents`;
 const external = []; // calls to SMS providers
 let providerReply = '{"status":"success"}';
+const paystack = {}; // reference -> verify response
 function curl(url, opt = {}) {
   const args = ['-sS', '-X', (opt.method || 'get').toUpperCase(), '-w', '\n%{http_code}', url, '-H', 'Content-Type: application/json'];
   for (const [k, v] of Object.entries(opt.headers || {})) args.push('-H', `${k}: ${v}`);
@@ -17,6 +18,11 @@ const sandbox = {
   PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => ({ FIRESTORE_BASE: BASE, TEST_TOKEN: 'owner' })[k] ?? null }) },
   ScriptApp: { getOAuthToken: () => 'x' },
   UrlFetchApp: { fetch: (url, opt) => {
+    if (url.startsWith('https://api.paystack.co/transaction/verify/')) {
+      const ref = decodeURIComponent(url.split('/').pop()); external.push({ url, opt });
+      const r = paystack[ref] ?? { status: false, message: 'Transaction reference not found' };
+      return { getResponseCode: () => (paystack[ref] ? 200 : 400), getContentText: () => JSON.stringify(r) };
+    }
     if (!url.startsWith('http://' + HOST)) { external.push({ url, opt }); return { getResponseCode: () => 200, getContentText: () => providerReply }; }
     const r = curl(url, opt); return { getResponseCode: () => r.code, getContentText: () => r.text };
   } },
@@ -124,5 +130,63 @@ t('Gonlinesites: an error reply is recorded as failed, with the reason', () => {
   eq(m2.status, 'failed');
   providerReply = '{"status":"success"}';
 });
+console.log('Paystack online giving');
+const ok = (ref, pesewas, extra = {}) => ({ status: true, message: 'Verification successful', data: { status: 'success', reference: ref, amount: pesewas, currency: 'GHS', channel: 'mobile_money', paid_at: '2026-11-22T09:15:00.000Z', fees: 195, ...extra } });
+const gift = (id, o) => put(`onlineGifts/${id}`, { purpose: 'tithe', projectId: '', branchId: 'A', name: 'Ama', phone: '024 111 1111', phoneKey: '241111111', email: '', amount: 100, currency: 'GHS', status: 'pending', createdAt: new Date(), ...o });
+const docOf = (p) => S.fs.get(p)?.data;
+t('no secret key → nothing is verified', () => { gift('TOGG-A1', {}); eq(S.verifyOnlineGifts(new Date()), 0); eq(docOf('onlineGifts/TOGG-A1').status, 'pending'); });
+t('a real MoMo tithe is confirmed and recorded once, matched to the member', () => {
+  put('secrets/paystack', { secretKey: 'sk_test_x' });
+  paystack['TOGG-A1'] = ok('TOGG-A1', 10000);
+  eq(S.verifyOnlineGifts(new Date()), 1);
+  const g = docOf('giving/ps_TOGG-A1');
+  eq([g.amount, g.type, g.method, g.memberId, g.branchId, g.date], [100, 'tithe', 'momo', 'ama', 'A', '2026-11-22']);
+  if (!/fee GH₵1.95/.test(g.note)) throw new Error('fee missing');
+  eq(docOf('onlineGifts/TOGG-A1').status, 'success');
+  eq(S.verifyOnlineGifts(new Date()), 0);
+  eq(external.filter((x) => x.url.includes('TOGG-A1')).every((x) => x.opt.headers.Authorization === 'Bearer sk_test_x'), true);
+});
+t('the amount recorded is what Paystack says was paid, not what the page said', () => {
+  gift('TOGG-A2', { amount: 5000 }); paystack['TOGG-A2'] = ok('TOGG-A2', 500);
+  S.verifyOnlineGifts(new Date()); eq(docOf('giving/ps_TOGG-A2').amount, 5);
+});
+t('a payment Paystack does not know stays pending (cannot be faked)', () => {
+  gift('TOGG-FAKE', {}); S.verifyOnlineGifts(new Date());
+  eq(docOf('onlineGifts/TOGG-FAKE').status, 'pending'); if (docOf('giving/ps_TOGG-FAKE')) throw new Error('recorded a fake payment');
+});
+t('failed payments are marked failed with the reason', () => {
+  gift('TOGG-F', {}); paystack['TOGG-F'] = { status: true, data: { status: 'failed', reference: 'TOGG-F', gateway_response: 'Insufficient funds', amount: 10000, currency: 'GHS' } };
+  S.verifyOnlineGifts(new Date()); eq(docOf('onlineGifts/TOGG-F').status, 'failed'); eq(docOf('onlineGifts/TOGG-F').error, 'Insufficient funds');
+});
+t('wrong currency is refused', () => {
+  gift('TOGG-USD', {}); paystack['TOGG-USD'] = ok('TOGG-USD', 10000, { currency: 'USD' });
+  S.verifyOnlineGifts(new Date()); eq(docOf('onlineGifts/TOGG-USD').status, 'failed'); if (docOf('giving/ps_TOGG-USD')) throw new Error('recorded');
+});
+t('abandoned checkouts are closed after 3 hours', () => {
+  gift('TOGG-OLD', { createdAt: new Date(Date.now() - 4 * 3600e3) }); paystack['TOGG-OLD'] = { status: true, data: { status: 'abandoned', reference: 'TOGG-OLD' } };
+  S.verifyOnlineGifts(new Date()); eq(docOf('onlineGifts/TOGG-OLD').status, 'abandoned');
+});
+t('project gifts raise the project total', () => {
+  put('projects/roof', { title: 'Roof', goal: 1000, raised: 100, donors: 1, public: true });
+  gift('TOGG-P', { purpose: 'project', projectId: 'roof', phoneKey: '', name: 'Visitor' }); paystack['TOGG-P'] = ok('TOGG-P', 25050, { channel: 'card' });
+  S.verifyOnlineGifts(new Date());
+  const pr = docOf('projects/roof'); eq([pr.raised, pr.donors], [350.5, 2]);
+  const g = docOf('giving/ps_TOGG-P'); eq([g.type, g.method, g.projectId, g.memberId, g.memberName], ['project', 'card', 'roof', null, 'Visitor']);
+});
+t('charity gifts go to the Charity Foundation, not church giving', () => {
+  gift('TOGG-C', { purpose: 'charity', name: 'Kofi Donor' }); paystack['TOGG-C'] = ok('TOGG-C', 20000);
+  S.verifyOnlineGifts(new Date());
+  const c = docOf('charity/ps_TOGG-C'); eq([c.type, c.amount, c.donor, c.form], ['support', 200, 'ama X', 'cash']);
+  if (docOf('giving/ps_TOGG-C')) throw new Error('also put in giving');
+});
+t('welfare gifts count for the month paid', () => {
+  gift('TOGG-W', { purpose: 'welfare' }); paystack['TOGG-W'] = ok('TOGG-W', 2000);
+  S.verifyOnlineGifts(new Date()); eq(docOf('giving/ps_TOGG-W').forMonths, ['2026-11']);
+});
+t('the web-app ping also confirms payments', () => {
+  gift('TOGG-H', {}); paystack['TOGG-H'] = ok('TOGG-H', 3000);
+  const out = JSON.parse(S.doGet({ parameter: {} })); eq(out.payments, 1); eq(docOf('onlineGifts/TOGG-H').status, 'success');
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

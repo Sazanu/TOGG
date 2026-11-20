@@ -37,6 +37,8 @@ import PublicPay from './pages/PublicPay';
 import Status from './pages/Status';
 import ServiceFinance from './pages/ServiceFinance';
 import Leadership from './pages/Leadership';
+import Station from './pages/Station';
+import PublicHere from './pages/PublicHere';
 
 function CharityGuard({ children }: { children: ReactNode }) {
   return useCanCharity() ? <>{children}</> : <Navigate to="/" replace />;
@@ -56,6 +58,7 @@ function Private() {
   return (
     <DataProvider>
       <Routes>
+        <Route path="station/:serviceId" element={<Guard cap="attendance.write"><Station /></Guard>} />
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="members" element={<Guard cap="members.list"><Members /></Guard>} />
@@ -101,6 +104,7 @@ export default function App() {
             <Route path="/join" element={<PublicForm kind="member" />} />
             <Route path="/visit" element={<PublicForm kind="visitor" />} />
             <Route path="/prayer" element={<PublicPrayer />} />
+            <Route path="/here/:serviceId" element={<PublicHere />} />
             <Route path="/pay" element={<PublicPay />} />
             <Route path="/give/:id" element={<PublicProject />} />
             <Route path="/charity-give" element={<PublicCharity />} />

@@ -40,6 +40,12 @@ The church management system for **Throne of God's Grace Ministries**: one churc
 - **Cell leaders' log book**, following the TOGG paper form: the member list, CM / UCV / ECV status, weekly ticks for cell meetings, Sunday services and weekday services, and the weekly meeting table (date, attendance, offering) with average and total rows. It can be printed.
 - **Notification bell** for everyone: personal reminders, the Head Pastor's attention items, new prayer requests and reports to review. It **plays a sound and shows a pop-up** when something new arrives, like WhatsApp Web.
 
+### Attendance and online giving
+- **Check-in station** (Attendance → *Open check-in station*): a full-screen page for a tablet or laptop at the door. Type a few letters of a name or phone number and tap the person; it chimes. There is a one-tap form for first-time visitors and a head-count for guests who aren't named. **Undo** is beside every name.
+- **QR self check-in:** the station shows a QR code. Members scan it, type their phone number, and are checked in automatically. A phone the system doesn't know appears on the station with *Add as visitor* or *Find by name*.
+- **Attendance reports:** pick a month and a service type. You see each service's adults, teens, children and guests on a chart, the average against the previous month, each member's attendance rate, and **who did not come at all**, with a *Text them* button. Exports to Excel.
+- **Paystack online giving** on the public **Give** page (`/pay`): tithe, offering, thanksgiving, seed, a project, welfare dues or charity, paid by MoMo or card. **Every payment is checked with Paystack by the server before it is recorded**, using the amount Paystack actually received. It goes into Giving (or Charity) under the right member, matched by phone number. Project totals and welfare months update by themselves, and Paystack's fee is noted. Set the keys under *Payments & links → Paystack*.
+
 👉 **To put it online, follow [DEPLOY.md](DEPLOY.md).**
 
 ## Roles
@@ -136,4 +142,6 @@ npm run typecheck
 | `deptReports` | id `{dept}_{branch}_{YYYY-MM}_{report\|budget\|plan}` |
 | `smsMessages`, `programmes`, `settings/sms`, `secrets/sms` | SMS outbox, recurring reminders, automation settings, API key (server-only) |
 | `registrations` | public form submissions |
+| `selfCheckins` | QR self check-ins waiting for the station |
+| `onlineGifts/{reference}`, `secrets/paystack` | Paystack payments (pending → success / failed, written only by the server), secret key (server-only) |
 | `meta/setup`, `meta/counters` | first-admin bootstrap and membership-number counter |

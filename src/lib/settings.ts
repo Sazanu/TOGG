@@ -4,7 +4,7 @@ import { db, firebaseConfig } from './firebase';
 import type { PaymentSettings, WelfareSettings } from './types';
 
 export const DEFAULT_PAYMENTS: PaymentSettings = {
-  momoNumber: '', momoName: "Throne of God's Grace Ministries", momoNetwork: 'MTN MoMo', paymentLink: '', bankDetails: '', publicSiteUrl: '',
+  momoNumber: '', momoName: "Throne of God's Grace Ministries", momoNetwork: 'MTN MoMo', paymentLink: '', paystackPublicKey: '', bankDetails: '', publicSiteUrl: '',
 };
 
 export const DEFAULT_WELFARE: WelfareSettings = {

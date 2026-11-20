@@ -1,7 +1,8 @@
 /**
  * TOGG — FREE SMS SERVER (Google Apps Script)
  * ------------------------------------------------------------
- * Sends the SMS that TOGG queues in Firestore, without the Firebase Blaze plan.
+ * Sends the SMS that TOGG queues in Firestore, without the Firebase Blaze plan,
+ * and confirms Paystack online giving with Paystack before recording it.
  *  - Instant:   TOGG pings this script's web-app URL right after a message is saved.
  *  - Every 5 min: scheduled messages, programme reminders (e.g. Peak Hour Prayer),
  *                 missed-service texts, birthdays and welfare reminders.
@@ -95,6 +96,21 @@ var fs = {
       throw new Error('Firestore update ' + path + ': ' + r.text.slice(0, 300));
     }
     if (r.code >= 300) throw new Error('Firestore update ' + path + ': ' + r.text.slice(0, 300));
+    return true;
+  },
+  /** Several writes at once, all-or-nothing. Each: {path, data, mustNotExist?, increments?:{field:n}} */
+  commit: function (writes) {
+    var root = base_().replace(/^https?:\/\/[^/]+\/v1\//, '');
+    var body = { writes: writes.map(function (w) {
+      var out = { update: { name: root + '/' + w.path, fields: toFields_(w.data || {}) } };
+      if (w.mask !== false) out.updateMask = { fieldPaths: Object.keys(w.data || {}) };
+      if (w.mustNotExist) { out.currentDocument = { exists: false }; delete out.updateMask; }
+      if (w.increments) out.updateTransforms = Object.keys(w.increments).map(function (k) { return { fieldPath: k, increment: toValue_(w.increments[k]) }; });
+      return out;
+    }) };
+    var r = http_('post', base_() + ':commit', body);
+    if (r.code === 400 || r.code === 409) return false; // e.g. already recorded
+    if (r.code >= 300) throw new Error('Firestore commit: ' + r.text.slice(0, 300));
     return true;
   },
   add: function (collection, data) {
@@ -341,6 +357,7 @@ function runTick(now) {
     queue({ branchId: null, message: w.template, audience: { type: 'welfare_defaulters' }, label: 'Welfare reminder ' + g.date.slice(0, 7) });
   }
   var processed = processQueue(now, created);
+  try { verifyOnlineGifts(now); } catch (e) { heartbeat_(settings, 'Paystack: ' + (e && e.message || e)); return { processed: processed, created: created.length }; }
   heartbeat_(settings, null);
   return { processed: processed, created: created.length };
 }
@@ -363,6 +380,63 @@ function heartbeat_(settings, error) {
   fs.update('meta/heartbeat', hb, error ? {} : { remove: ['error'] });
 }
 
+/* ---------------- Paystack online giving ---------------- */
+var PAYSTACK_TYPE = { tithe: 'tithe', offering: 'offering', thanksgiving: 'thanksgiving', seed: 'seed', project: 'project', welfare: 'welfare', building: 'building', missions: 'missions' };
+function phoneKey_(p) { return String(p || '').replace(/\D/g, '').slice(-9); }
+function paystackVerify_(secret, reference) {
+  var res = UrlFetchApp.fetch('https://api.paystack.co/transaction/verify/' + encodeURIComponent(reference), { headers: { Authorization: 'Bearer ' + secret }, muteHttpExceptions: true });
+  var json = null; try { json = JSON.parse(res.getContentText()); } catch (e) { /* */ }
+  return { code: res.getResponseCode(), json: json };
+}
+/** Confirms pending Paystack payments with Paystack itself and records the paid ones (once). */
+function verifyOnlineGifts(now) {
+  now = now || new Date();
+  var sec = fs.get('secrets/paystack');
+  var secret = sec ? String(sec.data.secretKey || '') : '';
+  if (!secret) return 0;
+  var recorded = 0;
+  fs.query('onlineGifts', [['status', '==', 'pending']]).forEach(function (d) {
+    var g = d.data;
+    var age = now.getTime() - (g.createdAt ? new Date(g.createdAt).getTime() : now.getTime());
+    var r = paystackVerify_(secret, d.id);
+    var data = r.json && r.json.data;
+    if (r.code === 200 && r.json && r.json.status && data && data.status === 'success' && data.reference === d.id) {
+      if (data.currency !== 'GHS') { fs.update('onlineGifts/' + d.id, { status: 'failed', error: 'Paid in ' + data.currency + ', expected GHS', checkedAt: now }); return; }
+      if (recordGift_(d.id, g, data, now)) recorded++;
+    } else if (data && data.status === 'failed') {
+      fs.update('onlineGifts/' + d.id, { status: 'failed', error: String(data.gateway_response || 'Payment failed'), checkedAt: now });
+    } else if (age > 3 * 3600 * 1000) {
+      fs.update('onlineGifts/' + d.id, { status: 'abandoned', checkedAt: now });
+    }
+  });
+  return recorded;
+}
+function recordGift_(ref, g, data, now) {
+  var amount = Math.round(Number(data.amount)) / 100; // Paystack sends pesewas; record what was REALLY paid
+  var date = String(data.paid_at || now.toISOString()).slice(0, 10);
+  var method = data.channel === 'mobile_money' ? 'momo' : data.channel === 'card' ? 'card' : 'bank';
+  var member = null;
+  if (g.phoneKey && g.branchId) fs.query('members', [['branchId', '==', g.branchId]]).some(function (m) { if (phoneKey_(m.data.phone) === g.phoneKey) { member = m; return true; } return false; });
+  var who = member ? ((member.data.firstName || '') + ' ' + (member.data.lastName || '')).trim() : (g.name || 'Online giver');
+  var fee = data.fees ? ' · Paystack fee GH₵' + (Number(data.fees) / 100).toFixed(2) : '';
+  var writes = [];
+  var recordPath;
+  if (g.purpose === 'charity') {
+    recordPath = 'charity/ps_' + ref;
+    writes.push({ path: recordPath, mustNotExist: true, data: { type: 'support', date: date, donor: who, form: 'cash', amount: amount, items: '', notes: 'Online via Paystack ' + ref + fee,
+      name: '', phone: g.phone || '', need: '', category: '', status: 'helped', beneficiaryId: '', place: '', peopleReached: 0, createdAt: now } });
+  } else {
+    recordPath = 'giving/ps_' + ref;
+    var gift = { branchId: g.branchId, date: date, amount: amount, type: PAYSTACK_TYPE[g.purpose] || 'other', method: method, memberId: member ? member.id : null, memberName: who,
+      reference: 'Paystack ' + ref, note: 'Online via Paystack' + fee, projectId: g.purpose === 'project' ? (g.projectId || null) : null,
+      forMonths: g.purpose === 'welfare' ? [date.slice(0, 7)] : [], createdBy: 'paystack', createdAt: now };
+    writes.push({ path: recordPath, mustNotExist: true, data: gift });
+    if (g.purpose === 'project' && g.projectId) writes.push({ path: 'projects/' + g.projectId, data: {}, increments: { raised: amount, donors: 1 } });
+  }
+  writes.push({ path: 'onlineGifts/' + ref, data: { status: 'success', recordId: recordPath, amountPaid: amount, channel: String(data.channel || ''), paidAt: date, checkedAt: now } });
+  return fs.commit(writes);
+}
+
 /* ---------------- entry points ---------------- */
 /** Time trigger (every 5 minutes). */
 function tick() {
@@ -380,7 +454,7 @@ function handle_(e) {
   var out = { ok: true };
   var lock = LockService.getScriptLock();
   if (lock.tryLock(20000)) {
-    try { out.sent = processQueue(new Date()); heartbeat_(null, null); }
+    try { out.sent = processQueue(new Date()); out.payments = verifyOnlineGifts(new Date()); heartbeat_(null, null); }
     catch (err) { out = { ok: false, error: String(err && err.message || err) }; }
     finally { lock.releaseLock(); }
   }

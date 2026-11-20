@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { ExternalLink } from 'lucide-react';
 import { Button, Card, Field, Input, PageHeader, Textarea, errorText, useToast } from '../components/ui';
 import { db, firebaseConfig } from '../lib/firebase';
@@ -50,6 +50,7 @@ export default function Settings() {
         </Card>
         <div className="flex justify-end"><Button type="submit">Save</Button></div>
       </form>
+      <PaystackKeys />
       <MediaStorage />
     </div>
   );
@@ -94,6 +95,59 @@ function MediaStorage() {
           </>
         )}
         <div className="flex justify-end"><Button type="submit">Save</Button></div>
+      </Card>
+    </form>
+  );
+}
+
+function PaystackKeys() {
+  const toast = useToast();
+  const saved = usePayments();
+  const [pk, setPk] = useState<string | null>(null);
+  const [sk, setSk] = useState('');
+  const [skSet, setSkSet] = useState<boolean | null>(null);
+  const [server, setServer] = useState('');
+  useEffect(() => { if (pk === null && saved) setPk(saved.paystackPublicKey ?? ''); }, [saved, pk]);
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'paystackKeyStatus')).then((x) => setSkSet(!!x.data()?.set)).catch(() => setSkSet(null));
+    getDoc(doc(db, 'settings', 'server')).then((x) => setServer(String(x.data()?.relayUrl ?? ''))).catch(() => {});
+  }, []);
+  if (pk === null) return null;
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    const p = pk!.trim(), s = sk.trim();
+    if (p && !/^pk_(live|test)_/.test(p)) { toast('err', 'The public key starts with pk_live_ or pk_test_.'); return; }
+    if (s && !/^sk_(live|test)_/.test(s)) { toast('err', 'The secret key starts with sk_live_ or sk_test_.'); return; }
+    if (p && s && p.slice(3, 7) !== s.slice(3, 7)) { toast('err', 'Use both LIVE keys or both TEST keys.'); return; }
+    try {
+      await setDoc(doc(db, 'settings', 'payments'), { paystackPublicKey: p }, { merge: true });
+      if (s) {
+        await setDoc(doc(db, 'secrets', 'paystack'), { secretKey: s, updatedAt: serverTimestamp() });
+        await setDoc(doc(db, 'settings', 'paystackKeyStatus'), { set: true, mode: s.slice(3, 7), at: serverTimestamp() });
+        setSk(''); setSkSet(true);
+      }
+      toast('ok', 'Paystack saved.');
+    } catch (err) { toast('err', errorText(err)); }
+  }
+  return (
+    <form onSubmit={save} className="mt-6">
+      <Card className="space-y-4 p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-stone-900">Paystack — online giving (MoMo &amp; card)</h2>
+          {pk.startsWith('pk_test_') && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">TEST keys — no real money</span>}
+          {pk.startsWith('pk_live_') && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">LIVE</span>}
+        </div>
+        <ol className="list-decimal space-y-1 rounded-xl bg-stone-50 p-4 pl-8 text-sm text-stone-600">
+          <li>Log in at <a className="text-royal-700 underline" href="https://dashboard.paystack.com" target="_blank" rel="noreferrer">dashboard.paystack.com</a> → <b>Settings → API Keys &amp; Webhooks</b>.</li>
+          <li>Copy the <b>Public key</b> and the <b>Secret key</b> below (start with Test keys, switch to Live when ready).</li>
+          <li>Set the <b>Webhook URL</b> on that page to your SMS server address{server ? <>: <code className="break-all">{server}</code></> : ' (see SMS messages → SMS provider)'} — payments then confirm instantly.</li>
+        </ol>
+        <Field label="Public key"><Input value={pk} onChange={(e) => setPk(e.target.value)} placeholder="pk_live_…" /></Field>
+        <Field label="Secret key" hint={skSet ? 'A secret key is saved. Type a new one only to replace it — it can never be shown again.' : 'Only the server can read it — used to confirm every payment with Paystack.'}>
+          <Input type="password" autoComplete="off" value={sk} onChange={(e) => setSk(e.target.value)} placeholder={skSet ? '•••••••• (saved)' : 'sk_live_…'} />
+        </Field>
+        <p className="text-xs text-stone-500">Payments are only recorded after the server confirms them with Paystack, using the amount Paystack actually received. Paystack's fee is noted on each record.</p>
+        <div className="flex justify-end"><Button type="submit">Save Paystack</Button></div>
       </Card>
     </form>
   );

@@ -208,6 +208,7 @@ export interface Audience {
   category?: MemberCategory;
   serviceId?: string;
   phones?: string[];
+  memberIds?: string[];
   includeVisitors?: boolean;
 }
 
@@ -340,6 +341,8 @@ export interface PaymentSettings {
   momoName: string;
   momoNetwork: string;
   paymentLink: string;
+  /** Paystack PUBLIC key (pk_live_… or pk_test_…). The secret key is stored separately and never shown. */
+  paystackPublicKey?: string;
   bankDetails: string;
   publicSiteUrl: string;
 }
@@ -398,4 +401,24 @@ export interface Reminder {
   remindAt: string; // YYYY-MM-DDTHH:mm (Ghana time)
   link: string;
   done: boolean;
+}
+
+export type OnlinePurpose = 'tithe' | 'offering' | 'thanksgiving' | 'seed' | 'project' | 'welfare' | 'charity' | 'building' | 'missions';
+/** A Paystack payment started on the public Give page. id = Paystack reference. Confirmed only by the server. */
+export interface OnlineGift {
+  id: string;
+  purpose: OnlinePurpose;
+  projectId: string;
+  branchId: string;
+  name: string;
+  phone: string;
+  phoneKey: string;
+  email: string;
+  amount: number;
+  currency: 'GHS';
+  status: 'pending' | 'success' | 'failed' | 'abandoned';
+  channel?: string;
+  givingId?: string;
+  error?: string;
+  createdAt?: { toDate(): Date } | null;
 }

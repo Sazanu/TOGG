@@ -194,6 +194,23 @@ service cloud.firestore {
       }
     }
 
+    // Members check themselves in from their phone (QR code at the door); the usher's station confirms.
+    match /selfCheckins/{id} {
+      function svc(sid) { return get(/databases/$(database)/documents/services/$(sid)).data; }
+      allow create: if request.resource.data.keys().hasOnly(['serviceId', 'branchId', 'phone', 'phoneKey', 'name', 'status', 'createdAt'])
+        && request.resource.data.serviceId is string
+        && exists(/databases/$(database)/documents/services/$(request.resource.data.serviceId))
+        && svc(request.resource.data.serviceId).branchId == request.resource.data.branchId
+        && request.resource.data.status == 'new'
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30
+        && request.resource.data.phoneKey is string && request.resource.data.phoneKey.size() <= 15
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.createdAt == request.time;
+      allow read: if canAttendance(resource.data.branchId);
+      allow update: if canAttendance(resource.data.branchId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'memberId', 'handledAt']);
+    }
+
     // ---------- tithes & giving ----------
     match /giving/{id} {
       allow read: if canGiving(resource.data.branchId);
@@ -203,6 +220,27 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.type is string;
       allow delete: if canGiving(resource.data.branchId);
+    }
+
+    // ---------- Paystack online giving (id = Paystack reference) ----------
+    // The public page creates a PENDING record; only the server (after asking Paystack) marks it paid
+    // and writes the matching giving record.
+    match /onlineGifts/{ref} {
+      allow create: if request.resource.data.keys().hasOnly(['purpose', 'projectId', 'branchId', 'name', 'phone', 'phoneKey', 'email', 'amount', 'currency', 'status', 'createdAt'])
+        && ref.matches('TOGG-[A-Z0-9-]{8,40}')
+        && request.resource.data.status == 'pending' && request.resource.data.currency == 'GHS'
+        && request.resource.data.amount is number && request.resource.data.amount >= 1 && request.resource.data.amount <= 100000
+        && request.resource.data.purpose in ['tithe', 'offering', 'thanksgiving', 'seed', 'project', 'welfare', 'charity', 'building', 'missions']
+        && request.resource.data.projectId is string && request.resource.data.branchId is string
+        && exists(/databases/$(database)/documents/branches/$(request.resource.data.branchId))
+        && request.resource.data.name is string && request.resource.data.name.size() <= 80
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30
+        && request.resource.data.phoneKey is string && request.resource.data.phoneKey.size() <= 15
+        && request.resource.data.email is string && request.resource.data.email.size() <= 120
+        && request.resource.data.createdAt == request.time;
+      allow get: if true; // the giver's page watches its own reference for the confirmation
+      allow list: if canGiving(resource.data.branchId);
+      allow update, delete: if false;
     }
 
     // ---------- service collections (money counted at each service) ----------
@@ -302,6 +340,11 @@ service cloud.firestore {
     }
     // MoMo number, payment link, bank details: shown on the public giving / project / charity pages.
     match /settings/payments {
+      allow read: if true;
+      allow write: if isGlobal();
+    }
+    // Address of the free SMS / payment server (no secrets) — public pages ping it.
+    match /settings/server {
       allow read: if true;
       allow write: if isGlobal();
     }

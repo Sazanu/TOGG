@@ -204,7 +204,7 @@ export function PublicCharity() {
         </div>
         <Card className="p-6">
           <h2 className="mb-3 font-semibold text-stone-900">Donate</h2>
-          <HowToPay p={p} reference="Charity foundation" />
+          <HowToPay p={p} reference="Charity foundation" giveLink="/pay?for=charity" />
           <p className="mt-4 text-xs text-stone-500">Want to give items (food, clothes, books)? Please contact the church office.</p>
         </Card>
       </div>

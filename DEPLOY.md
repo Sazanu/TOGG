@@ -65,6 +65,13 @@ Follow **[sms-server/README.md](sms-server/README.md)** (about 10 minutes). In s
 
 *(Alternative with the Blaze plan: `npx firebase deploy --only functions`.)*
 
+## 6. Online giving with Paystack (optional)
+1. Create a Paystack business account at paystack.com (Ghana) and complete the business verification for live payments.
+2. Go to dashboard.paystack.com → **Settings → API Keys & Webhooks**. Copy the **Public key** and **Secret key** into TOGG under **Payments & links → Paystack**. Start with the *Test* keys.
+3. On the same Paystack page, set the **Webhook URL** to your SMS server's Web app URL from step 5. Payments are then confirmed within seconds. Without it, the server's 5-minute check still confirms them.
+4. Open `/pay` on your site and give a test amount with Paystack's test card or test MoMo number. It should show **"received and recorded"** and appear under **Giving → Online payments**.
+5. When you're happy, replace both keys with the **Live** keys. **System status** turns green.
+
 ## After an update
 Run steps 2, 3 (deploy line only), 4 and 5 again, or simply:
 ```

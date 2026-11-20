@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { addDoc, collection, limit, onSnapshot, orderBy, query, serverTimestamp, where } from 'firebase/firestore';
-import { CalendarCheck, ChevronRight, Plus } from 'lucide-react';
+import { CalendarCheck, ChevronRight, Plus, Tablet } from 'lucide-react';
 import { Badge, Button, Card, Empty, Field, Input, Modal, PageHeader, Select, Spinner, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { ALL, useData } from '../context/DataContext';
 import { db } from '../lib/firebase';
 import { SERVICE_TYPES, prettyDate, shortDate, today } from '../lib/format';
 import type { Service } from '../lib/types';
+import AttendanceReports from './AttendanceReports';
 
 export function useServices(scope: string, max = 60) {
   const [services, setServices] = useState<Service[]>([]);
@@ -32,6 +33,7 @@ export default function Attendance() {
   const { scope, branchName } = useData();
   const { services, loading } = useServices(scope);
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<'services' | 'reports'>('services');
 
   const avg = useMemo(() => {
     const sundays = services.filter((s) => s.type === 'Sunday Service').slice(0, 8);
@@ -46,6 +48,19 @@ export default function Attendance() {
         subtitle={`${scope === ALL ? 'All branches' : branchName(scope)}${avg !== null ? ` · average Sunday: ${avg}` : ''}`}
         actions={<Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Start check-in</Button>}
       />
+      <div className="mb-6 flex gap-1 rounded-2xl border border-stone-200 bg-white p-1">
+        {(['services', 'reports'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={`rounded-xl px-4 py-2 text-sm font-medium ${tab === t ? 'bg-royal-800 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>{t === 'services' ? 'Services & check-in' : 'Reports'}</button>
+        ))}
+      </div>
+      {tab === 'reports' ? <AttendanceReports /> : <>
+      {services.filter((s) => s.date === today()).map((s) => (
+        <Card key={s.id} className="mb-4 flex flex-wrap items-center gap-4 border-gold-200 bg-gradient-to-r from-gold-50 to-white p-5">
+          <div className="flex-1"><div className="text-xs font-semibold uppercase tracking-wide text-gold-700">Today</div><div className="font-display text-lg font-bold text-royal-950">{s.title || s.type}</div><div className="text-sm text-stone-500">{branchName(s.branchId)} · {(s.count || 0) + (s.visitors || 0)} in church</div></div>
+          <Link to={`/station/${s.id}`}><Button variant="gold"><Tablet className="h-4 w-4" /> Open check-in station</Button></Link>
+          <Link to={`/attendance/${s.id}`}><Button variant="outline">List view</Button></Link>
+        </Card>
+      ))}
       <Card>
         {loading ? <Spinner /> : services.length === 0 ? (
           <Empty icon={<CalendarCheck />} title="No services recorded yet">Start a check-in for today's service to begin taking attendance.</Empty>
@@ -74,6 +89,7 @@ export default function Attendance() {
           </ul>
         )}
       </Card>
+      </>}
       {open && <NewService onClose={() => setOpen(false)} />}
     </div>
   );

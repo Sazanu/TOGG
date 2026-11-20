@@ -466,6 +466,8 @@ function ProviderSettings() {
     e.preventDefault();
     try {
       await save(d!);
+      // The public Give page and phones need the server address too (no secrets in it).
+      await setDoc(doc(db, 'settings', 'server'), { relayUrl: d!.relayUrl ?? '' }, { merge: true });
       if (apiKey.trim()) {
         await setDoc(doc(db, 'secrets', 'sms'), { apiKey: apiKey.trim(), updatedAt: serverTimestamp() });
         await setDoc(doc(db, 'settings', 'smsKeyStatus'), { set: true, by: profile?.displayName ?? '', at: serverTimestamp() });

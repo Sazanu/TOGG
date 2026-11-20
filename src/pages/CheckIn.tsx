@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   collection, deleteDoc, doc, increment, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc, writeBatch,
 } from 'firebase/firestore';
-import { ArrowLeft, Check, Download, MessageSquare, Minus, Plus, Search, Trash2, UserPlus, X } from 'lucide-react';
+import { ArrowLeft, Check, Download, MessageSquare, Minus, Plus, Search, Tablet, Trash2, UserPlus, X } from 'lucide-react';
 import { Avatar, Button, Card, Empty, Input, PageHeader, Spinner, errorText, useToast } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -154,6 +154,7 @@ export default function CheckIn() {
         subtitle={`${prettyDate(service.date)} · ${branchName(service.branchId)}`}
         actions={
           <>
+            <Link to={`/station/${serviceId}`}><Button variant="gold"><Tablet className="h-4 w-4" /> Check-in station</Button></Link>
             {can(profile?.role, 'sms.send') && checkins.length > 0 && <Button variant="outline" onClick={() => nav(`/messages?absentees=${serviceId}`)}><MessageSquare className="h-4 w-4" /> Text absentees</Button>}
             <Button variant="outline" onClick={exportCsv}><Download className="h-4 w-4" /> Export</Button>
             {canDelete && <Button variant="ghost" className="text-red-600" onClick={deleteService} title="Delete service"><Trash2 className="h-4 w-4" /></Button>}

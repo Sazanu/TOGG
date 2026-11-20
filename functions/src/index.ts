@@ -3,7 +3,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import { processMessage, runTick } from './core';
+import { processMessage, runTick, verifyOnlineGifts } from './core';
 
 initializeApp();
 const db = getFirestore();
@@ -31,4 +31,11 @@ export const sendSmsNow = onCall({ timeoutSeconds: 300 }, async (req) => {
 export const smsTick = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Africa/Accra', timeoutSeconds: 540 }, async () => {
   const res = await runTick(db);
   console.log('smsTick', res);
+});
+
+/** Called by the public Give page after Paystack says "paid": the server checks with Paystack itself. */
+export const confirmPayment = onCall({ timeoutSeconds: 60 }, async (req) => {
+  const ref = String(req.data?.reference ?? '');
+  if (!/^TOGG-[A-Z0-9-]{8,40}$/.test(ref)) throw new HttpsError('invalid-argument', 'Bad reference.');
+  return { recorded: await verifyOnlineGifts(db, new Date(), undefined, ref) };
 });

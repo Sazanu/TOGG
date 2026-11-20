@@ -31,12 +31,19 @@ It runs free on Google's servers with **your** Google account. ⏱ About 10 minu
 4. Open **System status** in TOGG: the SMS lines should be **green**. Press **“Send waiting messages now”**
    to send anything that was stuck in the queue.
 
+## 4. Paystack online giving (optional)
+The same script also confirms Paystack payments. It asks Paystack directly (`/transaction/verify`) with your secret key and only then records the gift, once. Nothing else is needed in the script:
+1. In TOGG, go to **Payments & links → Paystack**. Paste the public key and the secret key (both *test* or both *live*) and Save.
+2. In the Paystack dashboard, go to **Settings → API Keys & Webhooks → Webhook URL**. Paste the **same Web app URL** as above.
+3. A payment is then recorded within seconds. Even without the webhook, it is picked up within 5 minutes.
+
 ## If something is red
 | Message | Fix |
 |---|---|
 | `PERMISSION_DENIED` / `Cloud Firestore API has not been used in project …` | Apps Script ⚙️ Project Settings → **Google Cloud Platform (GCP) Project** → **Change project** → enter the Firebase **project number** (Firebase console → Project settings → General). Then run `setup` again. |
 | `Arkesel 401` / `invalid api key` | Copy the API key again from the Arkesel dashboard → paste in TOGG → Save. |
 | Sender ID rejected | Sender IDs must be approved by your SMS provider first (max 11 letters). |
+| `Paystack 401` / `Invalid key` | Paste the **secret** key again (Payments & links → Paystack). It must be the same mode (test or live) as the public key. |
 | SMS server “Stopped” | Run **setup** again in the Apps Script editor (restarts the timer). |
 
 **Updating the script later:** paste the new `Code.js`, Save, then **Deploy → Manage deployments → ✏️ → Version: New version → Deploy** (the URL stays the same).

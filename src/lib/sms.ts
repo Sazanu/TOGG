@@ -74,7 +74,8 @@ export async function queueSms(data: {
  */
 export async function wakeSmsServer(id?: string): Promise<{ id: string; delivered: boolean; via?: string; error?: string }> {
   let relayUrl = '';
-  try { relayUrl = String((await getDoc(doc(db, 'settings', 'sms'))).data()?.relayUrl ?? ''); } catch { /* ignore */ }
+  try { relayUrl = String((await getDoc(doc(db, 'settings', 'server'))).data()?.relayUrl ?? ''); } catch { /* public pages */ }
+  if (!relayUrl) { try { relayUrl = String((await getDoc(doc(db, 'settings', 'sms'))).data()?.relayUrl ?? ''); } catch { /* ignore */ } }
   if (relayUrl) {
     try {
       // The Apps Script answers from another site, so the reply is not readable here;

@@ -261,7 +261,7 @@ export function PublicProject() {
               {p.description && <p className="mt-2 whitespace-pre-line text-sm text-stone-600">{p.description}</p>}
               <div className="mt-5"><Thermometer p={p} big /></div>
             </Card>
-            <Card className="p-6"><h2 className="mb-3 font-semibold text-stone-900">Give towards it</h2><HowToPay p={payments} reference={p.title} /></Card>
+            <Card className="p-6"><h2 className="mb-3 font-semibold text-stone-900">Give towards it</h2><HowToPay p={payments} reference={p.title} giveLink={`/pay?for=project&project=${p.id}`} /></Card>
             {p.milestones.length > 0 && (
               <Card className="p-6"><h2 className="mb-3 font-semibold text-stone-900">Milestones</h2>
                 <ul className="space-y-2">{p.milestones.map((m, i) => <li key={i} className="flex items-center gap-2 text-sm">{m.done ? <CheckCircle2 className="h-5 w-5 text-emerald-500" /> : <Circle className="h-5 w-5 text-stone-300" />}<span className={m.done ? 'text-stone-500' : 'text-stone-800'}>{m.title}</span></li>)}</ul>

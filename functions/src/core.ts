@@ -310,6 +310,61 @@ export async function runTick(db: Firestore, now = new Date(), providerOverride?
   const queued = await db.collection('smsMessages').where('status', '==', 'queued').get();
   const ids = new Set([...created, ...due.docs.map((d) => d.id), ...queued.docs.map((d) => d.id)]);
   for (const id of ids) await processMessage(db, id, now, providerOverride);
+  await verifyOnlineGifts(db, now).catch((e) => console.error('paystack', e));
   await db.doc('meta/heartbeat').set({ at: FieldValue.serverTimestamp(), via: 'cloud-functions', provider: settings.provider, ok: true }, { merge: true });
   return { processed: ids.size, created: created.length };
+}
+
+/* ---------------- Paystack online giving ---------------- */
+const PAYSTACK_TYPE: Record<string, string> = { tithe: 'tithe', offering: 'offering', thanksgiving: 'thanksgiving', seed: 'seed', project: 'project', welfare: 'welfare', building: 'building', missions: 'missions' };
+type Fetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<{ status: number; json(): Promise<any> }>;
+
+/** Confirms pending Paystack payments with Paystack and records paid ones exactly once. */
+export async function verifyOnlineGifts(db: Firestore, now = new Date(), fetchImpl: Fetch = fetch as unknown as Fetch, onlyRef?: string) {
+  const secret = String((await db.doc('secrets/paystack').get()).data()?.secretKey ?? '');
+  if (!secret) return 0;
+  const pending = onlyRef ? [await db.doc(`onlineGifts/${onlyRef}`).get()].filter((d) => d.exists && d.data()!.status === 'pending')
+    : (await db.collection('onlineGifts').where('status', '==', 'pending').get()).docs;
+  let recorded = 0;
+  for (const d of pending) {
+    const g = d.data()!;
+    const res = await fetchImpl(`https://api.paystack.co/transaction/verify/${encodeURIComponent(d.id)}`, { headers: { Authorization: `Bearer ${secret}` } });
+    const body = await res.json().catch(() => null);
+    const data = body?.data;
+    const created = (g.createdAt as Timestamp | undefined)?.toMillis?.() ?? now.getTime();
+    if (res.status === 200 && body?.status && data?.status === 'success' && data.reference === d.id) {
+      if (data.currency !== 'GHS') { await d.ref.update({ status: 'failed', error: `Paid in ${data.currency}, expected GHS`, checkedAt: now }); continue; }
+      const amount = Math.round(Number(data.amount)) / 100;
+      const date = String(data.paid_at || now.toISOString()).slice(0, 10);
+      const method = data.channel === 'mobile_money' ? 'momo' : data.channel === 'card' ? 'card' : 'bank';
+      const members = g.branchId ? (await db.collection('members').where('branchId', '==', g.branchId).get()).docs : [];
+      const member = g.phoneKey ? members.find((m) => String(m.data().phone || '').replace(/\D/g, '').slice(-9) === g.phoneKey) : undefined;
+      const who = member ? `${member.data().firstName ?? ''} ${member.data().lastName ?? ''}`.trim() : (g.name || 'Online giver');
+      const fee = data.fees ? ` · Paystack fee GH₵${(Number(data.fees) / 100).toFixed(2)}` : '';
+      try {
+        await db.runTransaction(async (tx) => {
+          const cur = await tx.get(d.ref);
+          if (cur.data()?.status !== 'pending') return;
+          let recordPath: string;
+          if (g.purpose === 'charity') {
+            recordPath = `charity/ps_${d.id}`;
+            tx.create(db.doc(recordPath), { type: 'support', date, donor: who, form: 'cash', amount, items: '', notes: `Online via Paystack ${d.id}${fee}`, name: '', phone: g.phone ?? '', need: '', category: '', status: 'helped', beneficiaryId: '', place: '', peopleReached: 0, createdAt: now });
+          } else {
+            recordPath = `giving/ps_${d.id}`;
+            tx.create(db.doc(recordPath), { branchId: g.branchId, date, amount, type: PAYSTACK_TYPE[g.purpose] ?? 'other', method, memberId: member?.id ?? null, memberName: who,
+              reference: `Paystack ${d.id}`, note: `Online via Paystack${fee}`, projectId: g.purpose === 'project' ? (g.projectId || null) : null,
+              forMonths: g.purpose === 'welfare' ? [date.slice(0, 7)] : [], createdBy: 'paystack', createdAt: now });
+            if (g.purpose === 'project' && g.projectId) tx.update(db.doc(`projects/${g.projectId}`), { raised: FieldValue.increment(amount), donors: FieldValue.increment(1) });
+          }
+          tx.update(d.ref, { status: 'success', recordId: recordPath, amountPaid: amount, channel: String(data.channel ?? ''), paidAt: date, checkedAt: now });
+        });
+        recorded++;
+      } catch (e) { console.error('record gift', d.id, e); }
+    } else if (data?.status === 'failed') {
+      await d.ref.update({ status: 'failed', error: String(data.gateway_response || 'Payment failed'), checkedAt: now });
+    } else if (now.getTime() - created > 3 * 3600e3) {
+      await d.ref.update({ status: 'abandoned', checkedAt: now });
+    }
+  }
+  return recorded;
 }

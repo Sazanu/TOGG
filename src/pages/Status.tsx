@@ -63,6 +63,17 @@ export default function Status() {
     const address = p.publicSiteUrl || (isLocalAddress(window.location.origin) ? '' : window.location.origin);
     out.push(address ? { area: 'Settings', name: 'Public web address', light: 'green', detail: `QR codes and SMS links use ${address}` }
       : { area: 'Settings', name: 'Public web address', light: 'amber', detail: `Not set — links use https://${firebaseConfig.projectId}.web.app, which only works if the site is published there.`, fix: <Link className="underline" to="/settings">Payments &amp; links → Public web address</Link> });
+    const psk = await safe(() => getDoc(doc(db, 'settings', 'paystackKeyStatus')));
+    const pskSet = psk.ok && !!psk.v.data()?.set;
+    const pkey = String(p.paystackPublicKey ?? '');
+    out.push(!pkey ? { area: 'Settings', name: 'Paystack online giving', light: 'amber', detail: 'Not set up — the Give page only shows MoMo / bank details.', fix: <Link className="underline" to="/settings">Payments &amp; links → Paystack</Link> }
+      : !pskSet ? { area: 'Settings', name: 'Paystack online giving', light: 'red', detail: 'Public key saved but no secret key — payments cannot be confirmed or recorded.', fix: <Link className="underline" to="/settings">Payments &amp; links → Paystack → Secret key</Link> }
+        : { area: 'Settings', name: 'Paystack online giving', light: pkey.startsWith('pk_test_') ? 'amber' : 'green', detail: pkey.startsWith('pk_test_') ? 'TEST mode — no real money. Switch to live keys when ready.' : 'LIVE — payments are confirmed with Paystack and recorded automatically.' });
+    const stuckPay = await safe(() => getDocs(query(collection(db, 'onlineGifts'), where('status', '==', 'pending'))));
+    if (stuckPay.ok && pskSet) {
+      const old = stuckPay.v.docs.filter((d) => { const c = d.data().createdAt?.toDate?.(); return c && Date.now() - c.getTime() > 15 * 60000; }).length;
+      if (old) out.push({ area: 'Settings', name: 'Online payments waiting', light: 'amber', detail: `${old} Paystack payment(s) not confirmed after 15 minutes (often closed checkouts; they close after 3 hours).`, fix: <>Check that the SMS server is running (it also confirms payments).</> });
+    }
     const media = await safe(() => getDoc(doc(db, 'settings', 'media')));
     const m = media.ok ? media.v.data() ?? {} : {};
     out.push(m.provider === 'firebase' || (m.cloudName && m.uploadPreset) ? { area: 'Settings', name: 'Voice notes & videos', light: 'green', detail: m.provider === 'firebase' ? 'Firebase Storage' : `Cloudinary (${m.cloudName})` }

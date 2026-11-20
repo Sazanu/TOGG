@@ -359,6 +359,60 @@ await t('old attendance data: hidden from others and the public', async () => {
   await assertFails(setDoc(doc(anon(), 'attendance/x'), { name: 'spam' }));
 });
 
+
+console.log('Self check-in, online giving, server settings');
+const sc = (o = {}) => ({ serviceId: 'sA', branchId: 'A', phone: '0241234567', phoneKey: '241234567', name: 'Ama', status: 'new', createdAt: serverTimestamp(), ...o });
+await t('public can self check-in to a real service', () => assertSucceeds(setDoc(doc(anon(), 'selfCheckins/x1'), sc())));
+await t('self check-in must match the service branch', () => assertFails(setDoc(doc(anon(), 'selfCheckins/x2'), sc({ branchId: 'B' }))));
+await t('self check-in to a missing service is refused', () => assertFails(setDoc(doc(anon(), 'selfCheckins/x3'), sc({ serviceId: 'nope' }))));
+await t('self check-in cannot carry extra fields or a status', async () => {
+  await assertFails(setDoc(doc(anon(), 'selfCheckins/x4'), sc({ memberId: 'm1' })));
+  await assertFails(setDoc(doc(anon(), 'selfCheckins/x5'), sc({ status: 'matched' })));
+});
+await t('public cannot read self check-ins', () => assertFails(getDoc(doc(anon(), 'selfCheckins/x1'))));
+await t('branch usher reads and matches own branch check-ins', async () => {
+  await assertSucceeds(getDocs(query(collection(db('ushA'), 'selfCheckins'), where('serviceId', '==', 'sA'), where('branchId', '==', 'A'), where('status', '==', 'new'))));
+  await assertSucceeds(updateDoc(doc(db('ushA'), 'selfCheckins/x1'), { status: 'matched', memberId: 'm1', handledAt: serverTimestamp() }));
+});
+await t('usher cannot rewrite the phone on a check-in', () => assertFails(updateDoc(doc(db('ushA'), 'selfCheckins/x1'), { phone: '000' })));
+await env.withSecurityRulesDisabled((ctx) => setDoc(doc(ctx.firestore(), 'users/ushB'), { ...base, role: 'usher', branchId: 'B', active: true }));
+await t('other branch cannot read a check-in', () => assertFails(getDoc(doc(db('ushB'), 'selfCheckins/x1'))));
+
+const og = (o = {}) => ({ purpose: 'tithe', projectId: '', branchId: 'A', name: 'Kofi', phone: '0241234567', phoneKey: '241234567', email: 'k@x.com', amount: 50, currency: 'GHS', status: 'pending', createdAt: serverTimestamp(), ...o });
+await t('public can start an online gift', () => assertSucceeds(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-XYZ0987654'), og())));
+await t('giver can watch their own reference', () => assertSucceeds(getDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-XYZ0987654'))));
+await t('online gift cannot be created already "success"', () => assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-AAAAAAAAAA'), og({ status: 'success' }))));
+await t('online gift: bad reference / amount / branch / purpose refused', async () => {
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/hack'), og()));
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-BBBBBBBBBB'), og({ amount: 0 })));
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-CCCCCCCCCC'), og({ amount: 500000 })));
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-DDDDDDDDDD'), og({ branchId: 'ZZ' })));
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-EEEEEEEEEE'), og({ purpose: 'free money' })));
+  await assertFails(setDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-FFFFFFFFFF'), og({ currency: 'USD' })));
+});
+await t('nobody can mark an online gift paid from the app', async () => {
+  await assertFails(updateDoc(doc(anon(), 'onlineGifts/TOGG-ABC123-XYZ0987654'), { status: 'success' }));
+  await assertFails(updateDoc(doc(db('head'), 'onlineGifts/TOGG-ABC123-XYZ0987654'), { status: 'success' }));
+  await assertFails(deleteDoc(doc(db('head'), 'onlineGifts/TOGG-ABC123-XYZ0987654')));
+});
+await t('finance lists own branch online gifts; public cannot list', async () => {
+  await assertSucceeds(getDocs(query(collection(db('finA'), 'onlineGifts'), where('branchId', '==', 'A'))));
+  await assertFails(getDocs(collection(anon(), 'onlineGifts')));
+  await assertFails(getDocs(query(collection(db('finA'), 'onlineGifts'), where('branchId', '==', 'B'))));
+});
+await t('Paystack secret is write-only', async () => {
+  await assertSucceeds(setDoc(doc(db('head'), 'secrets/paystack'), { secretKey: 'sk_test_x' }));
+  await assertFails(getDoc(doc(db('head'), 'secrets/paystack')));
+  await assertFails(getDoc(doc(anon(), 'secrets/paystack')));
+  await assertFails(setDoc(doc(db('bpA'), 'secrets/paystack'), { secretKey: 'sk_test_y' }));
+});
+await t('settings/server: public read, only Super Admin writes', async () => {
+  await assertSucceeds(setDoc(doc(db('head'), 'settings/server'), { relayUrl: 'https://script.google.com/x' }));
+  await assertSucceeds(getDoc(doc(anon(), 'settings/server')));
+  await assertFails(setDoc(doc(db('bpA'), 'settings/server'), { relayUrl: 'https://evil' }));
+  await assertFails(setDoc(doc(anon(), 'settings/server'), { relayUrl: 'https://evil' }));
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup();
 process.exit(fail ? 1 : 0);
